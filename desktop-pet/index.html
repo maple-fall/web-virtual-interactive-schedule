@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>桌面虚拟宠物日程助手 V2.0</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <h1 class="logo">🐾 桌面日程助手</h1>
+    <div class="top-actions">
+      <button id="btn-import" class="btn">导入安排表</button>
+      <button type="button" id="btn-template" class="btn btn-link">下载模板</button>
+      <button id="btn-export" class="btn btn-ghost">导出备份</button>
+      <button id="btn-import-backup" class="btn btn-ghost">导入备份</button>
+      <button id="btn-pip" class="btn btn-ghost" hidden>画中画</button>
+      <button id="btn-bg" class="btn btn-ghost">更换背景</button>
+      <button id="btn-bg-clear" class="btn btn-ghost" hidden>清除背景</button>
+      <button id="btn-wallpaper" class="btn btn-ghost">界面壁纸</button>
+      <button id="btn-wallpaper-clear" class="btn btn-ghost" hidden>清除壁纸</button>
+      <input type="file" id="file-csv" accept=".csv,.pdf,text/csv,application/pdf" hidden>
+      <input type="file" id="file-backup" accept=".json,application/json" hidden>
+      <input type="file" id="file-wallpaper" accept="image/*" hidden>
+    </div>
+    <div id="bg-picker" class="bg-picker" hidden></div>
+    <div id="wallpaper-picker" class="bg-picker" hidden></div>
+  </header>
+
+  <main class="main-grid">
+
+    <section class="character-pane">
+      <div class="stage-wrap">
+        <div id="bubble" class="bubble" hidden>
+          <span class="bubble-text"></span>
+        </div>
+        <div id="stage" class="stage" data-state="idle" data-mode="svg">
+          <!-- video / SVG 角色由 animation.js 注入 -->
+        </div>
+        <div class="state-badge" id="state-badge">空闲中</div>
+      </div>
+    </section>
+
+    <aside class="plan-pane">
+      <h2 class="plan-title">📋 我的计划</h2>
+      <div id="plan-list" class="plan-list"></div>
+    </aside>
+
+  </main>
+
+  <footer class="dialog-pane">
+    <div id="chat-log" class="chat-log"></div>
+    <form id="chat-form" class="chat-input">
+      <input id="chat-text" type="text" autocomplete="off" maxlength="120"
+             placeholder="直接和我说，例如：明天下午两点半上英语课">
+      <button type="submit" class="btn btn-primary">发送</button>
+    </form>
+  </footer>
+
+</div>
+
+<!-- 普通 script 按依赖顺序加载，双击 index.html（file://）即可运行 -->
+<script src="app.js"></script>
+<script src="schedule/scheduleTemplate.js"></script>
+<script src="settings.js"></script>
+<script src="pip.js"></script>
+<script src="schedule/storage.js"></script>
+<script src="schedule/parser.js"></script>
+<script src="lib/pdfjs/pdf.min.js"></script>
+<script src="lib/pdfjs/cmaps.js"></script>
+<script src="schedule/timetableImporter.js"></script>
+<script src="schedule/pdfImporter.js"></script>
+<script src="schedule/manager.js"></script>
+<script src="character/animation.js"></script>
+<script src="character/stateMachine.js"></script>
+<script src="dialog/output.js"></script>
+<script src="dialog/bubble.js"></script>
+<script src="dialog/input.js"></script>
+</body>
+</html>
