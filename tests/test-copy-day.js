@@ -1,7 +1,7 @@
 /*
  * 无头测试：验证「把某天的全部安排复制到另一天」——解析、冲突成对询问、重叠/更换两种收尾
  * 重点覆盖用户点名的「部分时间重叠 → 合并成一条、名字逗号相连、时间段取并集」
- * 运行： node _scratch/test-copy-day.js
+ * 运行： node tests/test-copy-day.js
  */
 'use strict';
 const fs = require('fs');

@@ -152,13 +152,29 @@
     schemaVersion: 2,
     defaultDurationMin: 60,
     tickMs: 1000,
-    tempMs: { alert: 5000, done: 3500, refuse: 2500, warnStart: 5000, warnEnd: 4000 },
+    /* talking 是「本地模型交流中」的临时态，循环播放直到回复结束；
+       这个值只是兜底上限（等于 llm.chatTimeoutMs），正常路径由 LLM 主动收尾 */
+    tempMs: { alert: 5000, done: 3500, refuse: 2500, warnStart: 5000, warnEnd: 4000, talking: 90000 },
     startWindowSec: 90,          // 任务开始后多少秒内算“准点播报”
     warnStartMin: 5,             // 开始前多少分钟提醒
     warnEndMin: 10,              // 结束前多少分钟打气提醒
     warnStartPhrase: '「{title}」还有 {min} 分钟就要开始了，准备一下哦～',
     warnEndPhrase: '「{title}」还有 {min} 分钟就结束啦，坚持住，胜利在望～',
     materializeDays: 14,         // 周期日程向未来物化的窗口
+    /* 本地大模型（Ollama）接入参数。开关关闭时这些值不会产生任何请求 */
+    llm: {
+      healthTimeoutMs: 2500,     // /api/tags 探活超时
+      /* 意图提取。看着宽，其实纯 CPU 推理就这么慢：system prompt 643 token，
+         实测 prompt eval 9.5s + 生成 3.2s ≈ 13s（GPU 上快一个量级）。
+         卡 15s 会让功能在没独显的机器上直接不可用，改 30s 留余量 */
+      intentTimeoutMs: 30000,
+      chatTimeoutMs: 90000,      // 闲聊回复（本地小模型可能很慢）
+      intentMaxTokens: 256,
+      chatMaxTokens: 512,
+      historyTurns: 12,          // 只在内存里保留的对话轮数
+      contextTaskDays: 2,        // 系统提示里带几天的安排（今天+明天）
+      contextMaxTasks: 30        // 系统提示里最多列几条任务
+    },
     keywords: {
       studying: ['学习', '英语', '数学', '语文', '看书', '阅读', '复习', '预习',
         '上课', '课程', '写作业', '背书', '背单词', '刷题', '考试', '讲座', '论文'],
@@ -190,7 +206,7 @@
     stateLabel: {
       idle: '空闲中', studying: '学习中', working: '工作中',
       alert: '提醒', done: '任务完成', refuse: '温馨提醒',
-      warnStart: '提醒', warnEnd: '加油'
+      warnStart: '提醒', warnEnd: '加油', talking: '交流中'
     }
   };
 
@@ -408,10 +424,11 @@
       }
     },
 
-    handle: function (raw) {
+    handle: function (raw, opts) {
       var text = String(raw || '').trim();
       if (!text) return;
-      App.Output.user(text);
+      // 纠正重放（待确认时用户说了别的）不再重复上屏，见 handlePending
+      if (!opts || opts.echo !== false) App.Output.user(text);
 
       if (this.pending) {
         this.handlePending(text);
@@ -420,15 +437,32 @@
 
       var intent = App.Input.parse(text, { now: App.Clock.now() });
       if (!intent.ok) {
-        var msg = intent.reasonText || '没太听懂，可以换个说法。';
-        if (intent.examples && intent.examples.length) {
-          msg += '<br>你可以这样说：<br>· ' + intent.examples.join('<br>· ');
-        }
-        App.Output.pet(msg, { mood: 'idle' });
-        App.Bubble.say('没太听懂，再说一次吧～', { ms: 3000 });
+        // 离线正则没接住：本地模型开关打开且已连接时交给它（同步返回是否已接管）
+        if (App.LLM && App.LLM.tryRoute(text)) return;
+        this.replyUnparsed(intent);
         return;
       }
 
+      this.routeIntent(intent);
+    },
+
+    /* 两条路都没接住时的兜底话术。单独抽出来是给 llm.js 用：
+       模型超时 / 连不上时它会把原话退回来走同一套回复，
+       否则用户等了十几秒，连一句「没太听懂」都收不到 */
+    replyUnparsed: function (intent) {
+      var msg = (intent && intent.reasonText) || '没太听懂，可以换个说法。';
+      if (intent && intent.examples && intent.examples.length) {
+        msg += '<br>你可以这样说：<br>· ' + intent.examples.join('<br>· ');
+      }
+      App.Output.pet(msg, { mood: 'idle' });
+      App.Bubble.say('没太听懂，再说一次吧～', { ms: 3000 });
+      if (App.LLM) App.LLM.maybeHint();
+    },
+
+    /* 意图对象 -> 既有 do* 处理器。正则路径与本地模型路径共走这一条数据通路，
+       冲突检测、候选消歧、确认流程复用同一套逻辑，模型不会产生第二条写库路径。
+       opts.confirm = true 时，写操作先挂起等用户确认（模型通路专用，见 needsConfirm） */
+    routeIntent: function (intent, opts) {
       // 跨状态娱乐请求拦截：仅「任务进行中 + 娱乐意图」触发拒绝
       if (intent.intent === 'add' && intent.category === 'entertainment') {
         if (App.StateMachine.isBusy()) {
@@ -444,6 +478,17 @@
         // 带具体时间的娱乐安排（如「周五晚上八点看电影」）按普通日程入库
       }
 
+      /* 模型解析出来的写操作先复述再执行。
+         正则通路只在自己有把握时才接住，解析完直接执行没问题；
+         模型通路不一样——4B 会理解错，而删错、改错一条日程的代价
+         比多问一句大得多。查询是只读的，不拦。 */
+      if (opts && opts.confirm && this.needsConfirm(intent)) {
+        this.pending = { type: 'confirm-intent', intent: intent };
+        this.announce('我理解你要' + this.describeIntent(intent) +
+          '，对吗？（回复「确认」或「取消」）', { mood: 'alert', ms: 6000 });
+        return;
+      }
+
       switch (intent.intent) {
         case 'add': this.doAdd(intent); break;
         case 'copy': this.doCopy(intent); break;
@@ -451,6 +496,49 @@
         case 'update': this.doUpdate(intent); break;
         case 'query': this.doQuery(intent); break;
       }
+    },
+
+    /* 哪些模型意图要先确认：写操作全部；query 只读不拦。
+       add 缺时间也不拦 —— doAdd 自己会问「要安排在几点呢？」 */
+    needsConfirm: function (intent) {
+      if (intent.intent === 'add') return !!intent.startTime;
+      return intent.intent === 'update' || intent.intent === 'delete' || intent.intent === 'copy';
+    },
+
+    /* 把模型解析出的意图翻译成一句人话，用于执行前复述。
+       全部由字段拼装，不让模型自己措辞 —— 这个确认框本身就是防它理解错的，
+       再让它来写这句话就白防了 */
+    describeIntent: function (intent) {
+      /* 标题来自模型输出，而 Output.pet 走 innerHTML —— 拼进去之前必须转义。
+         日期和时间不用管：normalizeIntent 已把它们归一成 MM-DD / HH:MM */
+      var esc = App.util.escapeHtml;
+      var t = intent.target || {};
+      var who = t.titleFrag || intent.title;
+      who = who ? '「' + esc(who) + '」' : '';
+
+      if (intent.intent === 'add') {
+        return '添加 ' + this.dateLabel(intent.date) + ' ' + intent.startTime + '–' +
+          intent.endTime + ' 「' + esc(intent.title) + '」';
+      }
+      if (intent.intent === 'copy') {
+        return '把 ' + this.dateLabel(intent.targetDate) + ' 的安排复制到 ' +
+          this.dateLabel(intent.date);
+      }
+      if (intent.intent === 'delete') {
+        return '删除 ' + this.dateLabel(intent.targetDate || intent.date) +
+          (who ? ' 的 ' + who : '') + (t.startTime ? '（' + t.startTime + ' 开始）' : '');
+      }
+      if (intent.intent === 'update') {
+        var p = intent.patches || {};
+        var to = [];
+        if (p.date) to.push('日期改到 ' + this.dateLabel(p.date));
+        if (p.startTime) to.push('开始时间改成 ' + p.startTime);
+        if (p.durationMin) to.push('时长改成 ' + p.durationMin + ' 分钟');
+        if (p.title) to.push('标题改成「' + esc(p.title) + '」');
+        return '把 ' + this.dateLabel(intent.date) + (who ? ' 的 ' + who : '') + ' ' +
+          (to.length ? to.join('、') : '（没听清要改成什么）');
+      }
+      return '';
     },
 
     /* ---- 新增 ---- */
@@ -688,6 +776,21 @@
       if (/^(取消|算了|不要|否|n|no|不用)$/i.test(text)) {
         this.pending = null;
         this.announce('好的，已取消。', { mood: 'idle', ms: 2500 });
+        return;
+      }
+
+      /* 模型意图的确认门 */
+      if (pend.type === 'confirm-intent') {
+        if (/^(确认|确定|是|对|好|好的|嗯|y|yes|继续|执行|可以|ok)$/i.test(text)) {
+          this.pending = null;
+          this.routeIntent(pend.intent);   // 用户点过头了，这一遍不再拦
+          return;
+        }
+        /* 既不是确认也不是取消（取消在上面统一处理）：多半是在纠正理解。
+           撤掉待确认，把这句话当新指令重放一遍，省得用户照着原话再打一次。
+           echo:false 因为这条消息已经上过屏了 */
+        this.pending = null;
+        this.handle(text, { echo: false });
         return;
       }
 
@@ -1027,6 +1130,8 @@
     App.Controller.bindEvents();
     App.Controller.bindUI();
     App.Settings.init();   // 需在 Bubble / Output 之后，提示信息才能正常显示
+    // 本地模型：仅在开关打开时才会发探活请求，关闭时静默（见 dialog/llm.js）
+    if (App.LLM) App.LLM.init(App.Settings.llm);
     App.Pip.init();        // 依赖 Settings.bg 与 Animation
 
     App.StateMachine.init(App.Clock.now());

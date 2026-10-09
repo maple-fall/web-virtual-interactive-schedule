@@ -1,6 +1,6 @@
 /*
  * 无头测试：pip.js —— 开窗尺寸钳位 + 舞台搬进/搬回画中画窗口的全流程
- * 运行： node _scratch/test-pip.js
+ * 运行： node tests/test-pip.js
  */
 'use strict';
 const fs = require('fs');

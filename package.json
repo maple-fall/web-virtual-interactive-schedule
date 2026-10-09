@@ -1,0 +1,19 @@
+{
+  "name": "ai-compete-dev",
+  "version": "1.0.0",
+  "private": true,
+  "description": "dev-only：桌面宠物日程助手的回归测试与素材生成工具。desktop-pet/ 本体零依赖，跑应用不需要这个文件。",
+  "scripts": {
+    "test": "node tests/run.js",
+    "test:all": "node tests/run.js --all",
+    "test:e2e": "node tests/e2e-pdf-import.js",
+    "test:live": "node tests/test-llm-live.js",
+    "gen:pdf": "node tools/gen-schedule-pdf/gen.js",
+    "gen:cmaps": "node tools/gen-schedule-pdf/gen-cmaps.js",
+    "preview": "node tools/preview-template.js"
+  },
+  "dependencies": {
+    "pdfjs-dist": "3.11.174",
+    "pdfkit": "^0.17.0"
+  }
+}

@@ -1,7 +1,7 @@
 /*
  * 无头测试：验证 StateMachine 的「开始前 5 分钟 / 结束前 10 分钟」提醒逻辑
  * 用 vm 在共享上下文里按依赖顺序加载项目脚本，stub 掉 DOM / Animation
- * 运行： node _scratch/test-warn-reminders.js
+ * 运行： node tests/test-warn-reminders.js
  */
 'use strict';
 const fs = require('fs');

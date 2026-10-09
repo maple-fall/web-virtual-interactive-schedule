@@ -4,7 +4,8 @@
 > **想知道怎么用，看 [desktop-pet-使用说明.md](desktop-pet-使用说明.md)。**
 >
 > 文中的代码行号、测试通过数都是**当时**的快照，不保证现在还对得上——现状以代码为准。
-> 各篇按时间顺序排列，最后有「当前状态」一节。
+> 各篇按时间顺序排列。第六篇里那份「当前状态」同样是**当时**的快照，
+> 想知道现在是什么样，看 [desktop-pet-使用说明.md](desktop-pet-使用说明.md) 和代码。
 
 ## 时间线
 
@@ -22,6 +23,8 @@
 | [十](#十清理与文档收口) | 清理与文档收口 | `plans/` 从 4 篇收敛到 2 篇；腾出 30M |
 | [十一](#十一整日安排复制) | 整日安排复制 | 「把某天的安排复制到另一天」，撞上的成对询问重叠/更换 |
 | [十二](#十二再次收口设计稿折进本篇) | 再次收口 | 设计稿折进开发记录，`plans/` 回到 2 篇 |
+| [十三](#十三本地大模型接入ollama) | 本地大模型接入 | 接 Ollama（默认 `qwen3:4b`）：开关默认关，正则优先、模型兜底；`talking.webm` 只在连着模型说话时播 |
+| [十四](#十四目录重组测试与工具分家) | 目录重组 | `_scratch/` 拆成 `tests/` + `tools/`，依赖提到根目录；新增 `npm test` 一条命令跑完全部离线断言 |
 
 ---
 
@@ -319,7 +322,7 @@ entertainmentPatterns: [
 ### 3.4 杂项清理（对应用户第 1 条）
 
 源码层面**没有**无用文件：`desktop-pet/` 下 13 个源文件（1 html + 1 css + 11 js）+ 素材全部在用。
-真正需要清的只有 `_scratch/` 里的临时产物（Edge 临时 profile、诊断脚本）。
+真正需要清的只有 `tests/` 里的临时产物（Edge 临时 profile、诊断脚本）。
 
 ### 验证
 
@@ -388,9 +391,9 @@ entertainmentPatterns: [
 | 对象 | 大小 | 理由 |
 | --- | --- | --- |
 | `picture/【哲风壁纸】中山装-人生哲理.jpg` | 428KB | 与 `desktop-pet/data/wallpapers/wall1.jpg` md5 完全相同（`e51ed326…`），字节级重复 |
-| `_scratch/_edge_parse/`、`_edge_wallpaper/`、`_edge_pip/` | ~42MB | 跑 e2e 时 Edge 生成的临时用户目录 |
+| `tests/_edge_parse/`、`_edge_wallpaper/`、`_edge_pip/` | ~42MB | 跑 e2e 时 Edge 生成的临时用户目录 |
 
-`.gitignore` 补了 `_scratch/_edge_*/`——这三个目录**跑一次 e2e 就会重新生成**（约 40MB），
+`.gitignore` 补了 `tests/_edge_*/`——这三个目录**跑一次 e2e 就会重新生成**（约 40MB），
 不排除的话会被误提交。
 
 ### 文档审计：4 个实质错误
@@ -449,7 +452,7 @@ entertainmentPatterns: [
 
 整合前先把所有套件跑了一遍确认全绿，然后：
 
-| 保留（`_scratch/`，5 个） | 删掉 |
+| 保留（`tests/`，5 个） | 删掉 |
 | --- | --- |
 | `test-parse-time.js`（27 项） | `parse-e2e.js` |
 | `test-pip.js`（33 项） | `wallpaper-e2e.js` |
@@ -508,10 +511,10 @@ vm 沙箱测试，秒级跑完、有明确断言，**才是真正的回归网**�
 
 ```
 AIcompete/
-├── .gitignore              含 _scratch/_edge_*/ 排除
+├── .gitignore              含 tests/_edge_*/ 排除
 ├── desktop-pet/            13 个源文件 + 素材（共 23 文件），全部在被引用
 ├── plans/                  2 篇：使用说明 + 开发记录
-└── _scratch/               5 个 vm 测试脚本
+└── tests/               5 个 vm 测试脚本
 ```
 
 无用的东西已经清干净：删掉 `picture/`（字节重复）和全部 Edge 临时 profile 后，
@@ -573,7 +576,7 @@ AIcompete/
 ### 模板：一次性离线生成
 
 `desktop-pet/data/schedule_template.pdf`（30KB）是**生成产物、提交进仓库**，与原来下载静态 CSV
-是同一个思路，不改运行时逻辑。生成脚本 `_scratch/gen-schedule-pdf/gen.js`（Node + pdfkit）：
+是同一个思路，不改运行时逻辑。生成脚本 `tools/gen-schedule-pdf/gen.js`（Node + pdfkit）：
 
 - 中文字体按 `simhei.ttf → simkai.ttf → simfang.ttf → Deng.ttf → msyh.ttc` 顺序取第一个存在的。
   **优先单文件 TTF**：`.ttc` 是字体集合，fontkit 打开时取哪一面不稳定
@@ -624,7 +627,7 @@ AIcompete/
 - 用户把标题写太长在 PDF 里折了行：只有落在 title 列的续行会被接回上一行，跨列的折行接不了
 - 用户改动了列的位置（不是改内容，而是挪列）：表头分组数变了就报「表头列识别失败」，
   不猜、不静默丢数据
-- `_scratch/` 下多了 `package.json` / `node_modules`（pdfkit + pdfjs-dist，都是 dev-only），
+- `tests/` 下多了 `package.json` / `node_modules`（pdfkit + pdfjs-dist，都是 dev-only），
   `node_modules` 已进 `.gitignore`；**应用本体仍然零依赖**
 
 ---
@@ -666,7 +669,7 @@ pdf.js 支持 `getDocument({ CMapReaderFactory })`，自定义工厂的 `fetch({
   file:// 下必挂。只给工厂，`useWorkerFetch` 自动为 false，走消息通道到主线程的工厂
 - 真 worker 和 fake worker（file:// 回退）走的是同一套消息通道，两种模式都成立
 
-`_scratch/gen-schedule-pdf/gen-cmaps.js` 把 pdfjs-dist 的 **GB 系 33 个 CMap**（GB/GBK/GBT/
+`tools/gen-schedule-pdf/gen-cmaps.js` 把 pdfjs-dist 的 **GB 系 33 个 CMap**（GB/GBK/GBT/
 EUC/UniGB/Adobe-GB1）打包成 `lib/pdfjs/cmaps.js`（285KB 原始 → 382KB base64，惰性解码 + 缓存）。
 繁体 CNS / 日文 JIS / 韩文 KOR 没打包 —— 用到了会报「缺少内置 CMap：（该 PDF 用了未打包的编码）」，
 需要时改生成器的 `WANTED` 正则重跑。
@@ -703,10 +706,10 @@ EUC/UniGB/Adobe-GB1）打包成 `lib/pdfjs/cmaps.js`（285KB 原始 → 382KB ba
 ### 改动
 
 新增：`schedule/timetableImporter.js`（识别 + 展开）、`lib/pdfjs/cmaps.js`（生成产物）、
-`_scratch/gen-schedule-pdf/gen-cmaps.js`、`_scratch/test-timetable-import.js`
+`tools/gen-schedule-pdf/gen-cmaps.js`、`tests/test-timetable-import.js`
 修改：`schedule/pdfImporter.js`（接 CMap + 分发：五列表格优先，失败再试课表）、
 `app.js`（`expandTimetable` + confirm-import 分支加日期修正）、`index.html`（2 个 script）、
-`_scratch/package.json`（`gen:cmaps` / `test:timetable`）
+`package.json`（`gen:cmaps` / `test:timetable`）
 
 ### 验证
 
@@ -783,7 +786,7 @@ HTML 规范里 **`download` 属性只在同源 URL 上生效，跨源一律忽�
 
 ### 改动
 
-- `_scratch/gen-schedule-pdf/gen.js`：出 PDF 之后把字节读回来 base64 一份，
+- `tools/gen-schedule-pdf/gen.js`：出 PDF 之后把字节读回来 base64 一份，
   写出 `desktop-pet/schedule/scheduleTemplate.js`（`App.ScheduleTemplate`，
   含 `fileName` / `mime` / `base64` / 惰性解码并缓存 `blob()`）。
   **三份产物（pdf / csv / js）同一次生成写出**，避免漂移
@@ -805,7 +808,7 @@ HTML 规范里 **`download` 属性只在同源 URL 上生效，跨源一律忽�
 
 e2e 第 1 组新断言里最要紧的两条：**「点击后没有导航走」**（旧 bug 的表现就是跳去看 PDF）
 和**「落盘字节与 `data/schedule_template.pdf` 逐字节一致」**（不是只下了个同名文件）。
-CDP 侧配了 `Browser.setDownloadBehavior`，下载目录设在 `_scratch/_shot/e2e-downloads/`。
+CDP 侧配了 `Browser.setDownloadBehavior`，下载目录设在 `tests/_shot/e2e-downloads/`。
 
 ### 顺带：样本缺失时不再抛栈
 
@@ -853,9 +856,9 @@ CDP 侧配了 `Browser.setDownloadBehavior`，下载目录设在 `_scratch/_shot
 
 ### 项目内
 
-删 `_scratch/_shot/`（e2e 与 preview-template 的产物：打印导出的样本 PDF、模板渲染图、
+删 `_shot/`（e2e 与 preview-template 的产物：打印导出的样本 PDF、模板渲染图、
 下载验证目录）。`.gitignore` 里早就排除了它，测试跑一次就重建，实测 7 个 vm 套件都不会重建，
-只有真跑 e2e 才会。
+只有真跑 e2e 才会。（当时两者共用一个目录；现在随脚本分家，分别是 `tests/_shot/` 和 `tools/_shot/`。）
 
 按用户判断保留了 `claude_DesktopNotepad/`（Claude Code 配置样例，与应用无关），
 顺手把它和 `.gitignore` 补进了使用说明的目录树 —— 那棵树写着「整个仓库长这样」，
@@ -1027,10 +1030,10 @@ CSS 上有个坑：既有的 `.query-list li { display: flex }` 特异性是 (0,
 ### 勘察结论：项目本体是干净的
 
 扫过一遍，没发现任何临时/备份文件（`*.bak` / `*.tmp` / `*~` / `*.orig` / `*.log` / `Thumbs.db`），
-也没有上次 e2e 残留的 `_scratch/_edge_*/` 浏览器目录（`.gitignore` 里那条约 40MB 的规则
+也没有上次 e2e 残留的 `tests/_edge_*/` 浏览器目录（`.gitignore` 里那条约 40MB 的规则
 这次没被触发）。`claude_DesktopNotepad/` 按第十篇的判断继续保留。
 
-唯一的大件是 `_scratch/node_modules/`（**51M**）。列进了候选清单，但用户选择保留 ——
+唯一的大件是 `node_modules/`（**51M**）。列进了候选清单，但用户选择保留 ——
 删了它 `test-pdf-import.js` 就得先 `npm install`，为了省 51M 让一个回归套件默认跑不了，不划算。
 它是 gitignore 覆盖的 dev-only 依赖，不进仓库，留着不影响「项目整洁」。
 
@@ -1056,7 +1059,7 @@ CSS 上有个坑：既有的 `.query-list li { display: flex }` 特异性是 (0,
 | 删除项 | 大小 | 理由 |
 | --- | --- | --- |
 | `plans/desktop-pet-整日安排复制.md` | 10K | 见上，已折进本篇第十一篇 |
-| `_scratch/_shot/` | 104K | e2e 与 preview 的产物（打印导出的样本 PDF、下载验证目录）。`.gitignore` 已排除，跑一次 e2e 就重建 |
+| `_shot/`（当时） | 104K | e2e 与 preview 的产物（打印导出的样本 PDF、下载验证目录）。`.gitignore` 已排除，跑一次 e2e 就重建。现分为 `tests/_shot/` 与 `tools/_shot/` |
 
 第十篇删掉 `_shot/` 之后它又自己长回来了，这正好说明它**确实是纯产物**、删了没有信息损失。
 
@@ -1064,3 +1067,336 @@ CSS 上有个坑：既有的 `.query-list li { display: flex }` 特异性是 (0,
 
 8 个 vm 套件重跑一遍确认删除没碰到运行时代码：43 / 48 / 29 / 33 / 31 / 60 / 15 / 35，全 0 失败。
 本轮只动文档和产物目录，**没有改任何项目代码**。
+
+---
+
+## 十三、本地大模型接入（Ollama）
+
+用户要求：给这个纯前端的日程助手接一个**本地**模型（Ollama，默认 `qwen3:4b`），做到
+① 宠物对话 / 陪伴聊天 ② 自然语言建日程 ③ 结合日程回答用户问题；另外把 `vdio/` 里那段
+视频处理成 `videos/talking.webm`，**只在连着模型说话时**播放。
+
+四项决策由用户明确给出：
+
+1. 默认模型 `qwen3:4b`，测试与验证**只针对 4b**
+2. **显式开关，默认关闭** —— 关着时按原样运行，行为逐字不变
+3. 与用户交流时播放角色视频作为视觉反馈
+4. `App.Config` 只做增量追加；日程 / 背景 / 壁纸逻辑零改动
+
+本轮 plan mode 留下的设计稿 `Claude'sPlan.md` 已折进本篇删掉，理由同第十、十二篇：
+内容已被本篇覆盖，且逐文件改动清单以行号为施工依据，天然会随代码过期。
+
+### 为什么这个代码库接得进
+
+- 所有用户文本只有 `App.Controller.handle` 一个入口，未识别文本有明确的兜底分支
+- 已有意图契约（`dialog/input.js`）和纯函数解析器 `App.Input.parse`，天然是「离线第一道」
+- `App.Manager` 的 add / update / remove / query / copyDay 全部带校验，是现成的工具调用面
+- `StateMachine.enqueueTemp` 是单锁队列，tick 不覆盖临时态 → 新增一个临时态类型无副作用
+- 已有 Promise 异步路径（PDF 导入）、vm 沙箱测试基建、设置持久化白名单写法
+
+### 三条纪律
+
+写在 `dialog/llm.js` 文件头，改这个文件之前先读：
+
+1. **开关默认关。** `enabled=false` 时不发任何请求，Controller 兜底分支的文案保持逐字不变
+   —— 离线可用是产品承诺，模型只是锦上添花
+2. **正则优先。** 只有 `Input.parse` 没接住的文本才进 `llm.js`；识别出来的日程意图一律交回
+   `Controller.routeIntent`，走既有 `do*` 处理器。**`llm.js` 不直接调用 `App.Manager` 的写接口**
+   —— 模型因此不可能产生第二条写库路径，冲突检测、候选消歧、确认流程全部复用
+3. **提示词不出局域网。** 端点在 `sanitizeConfig` 里按回环 / 私网白名单校验
+   （`localhost` / `127.*` / `::1` / `10.*` / `192.168.*` / `172.16-31.*`），
+   经 `u.origin` 去掉凭据与路径，localStorage 被篡改也发不出去
+
+### 路由决策树
+
+```
+Controller.handle(text)
+├─ empty / pending / 常规流程均不变
+├─ intent = Input.parse(text, {now})           离线正则，即时
+│  ├─ ok → routeIntent(intent)                 新方法 = 原娱乐拦截 + switch 原样搬入
+│  └─ !ok → App.LLM.tryRoute(text)
+│            │  同步返回 true 表示已接管（异步干活）
+│            ├─ 开关关 / ?nollm=1 / 没连上 → 同步 false，零提示
+│            ├─ 提取出合法日程意图 → Controller.routeIntent(归一化后, {confirm:true})
+│            │      ├─ 写操作（添加/修改/删除/复制）→ 复述挂起，等「确认」才进 do*
+│            │      └─ 查询只读 → 不拦，直接进 doQuery
+│            ├─ 判成闲聊 → Chat.send(text)      流式回复，只读
+│            └─ 提取失败（超时 / 连不上 / 解析不出）
+│                 ├─ 网络类错误 → 状态降级 + 每会话一条提示
+│                 └─ 原话退回 replyUnparsed     ← 见「十几秒的等待必须给反馈」
+└─ tryRoute 返回 false → 原样输出「没太听懂」文案 + maybeHint()
+```
+
+`routeIntent` 是从 `handle` 里**原样抽出来**的（娱乐拦截块 + switch），行为零变化。
+掏出来是因为模型路径也要走同一套分发，不能有第二份。
+
+### 模型解析出的写操作，先复述再执行
+
+**需求**：功能操作（建日程那类）要先让模型把理解的结果交用户确认，再返回给程序执行；
+日常聊天和问答直接答。
+
+**做法**：`routeIntent(intent, opts)` 加了第二参数，模型通路传 `{confirm:true}`。
+进来的写操作（add / update / delete / copy）不执行，而是挂成
+`pending = {type:'confirm-intent'}`，用 `describeIntent()` 把意图字段拼成一句人话复述出来：
+
+```
+我理解你要添加 明天 15:00–16:00「项目评审会议」，对吗？（回复「确认」或「取消」）
+```
+
+- **复述文案由字段拼装，不让模型自己措辞** —— 这个确认框本身就是防它理解错的，
+  再让它来写这句话就白防了
+- **query 不拦**：只读，答错了顶多白看一眼；闲聊同理
+- **add 缺时间不拦**：`doAdd` 自己会问「要安排在几点呢？」，再拦一层是废话
+- **回复既不是确认也不是取消**（用户多半在纠正理解）→ 撤掉待确认，
+  把这句话当新指令重放一遍。为此时 `handle(text, {echo:false})` 加了静音选项，
+  否则纠正的那句话会在聊天记录里出现两次
+- 确认后走 `routeIntent(intent)`（不带 opts），重叠询问、候选消歧这些既有的二次确认照常触发
+
+`pending` 是**唯一会话位**，与重叠确认、消歧、导入确认共用。因为 `handle` 开头
+`if (this.pending)` 就把消息截走，模型不可能在待确认期间又插一条进来。
+
+**验证**：`test-llm.js` 第 9 组加 13 条断言（挂起不落库 / 复述含日期与标题 / 确认后入库 /
+取消后不动 / 纠正重放且只上屏一次 / query 不拦 / 标题尖括号转义）；`test-llm-live.js` 第 2 组改成
+真模型下的完整确认流程（挂起 → 复述 → 回「确认」→ 入库）。
+**注意 `test-llm-live.js` 包装 `routeIntent` 时必须原样转发 `opts`**——
+第一版包装函数只收一个参数，`{confirm:true}` 被吃掉，确认门被静默绕过，
+测试会「通过」一个根本不存在的直接入库行为。
+
+### 实测：think:false 没用，format 才有用
+
+（qwen3:4b / Ollama 0.34.4 / 纯 CPU）
+
+- **`think:false` 并不会关掉 qwen3 的思考** —— 它只是把思考从 `message.thinking` 搬进
+  `message.content`，`/no_think` 软开关同样无效。不加约束的闲聊实测 35 秒全程内心独白
+- 真正管住它的是 **`format` 结构约束**：
+  - 意图提取用 `format:'json'` → 1~5 秒，输出干净
+  - 闲聊用 `{type:'object',properties:{reply:{type:'string'}},required:['reply']}`
+    → 首字 0.3~3 秒，零泄漏
+- 加了约束之后，**聊天就不再是纯文本流，而是 JSON 字符串流**：要边收边解 `{"reply":"…"}`
+  里的转义字符串。`replyReader()` 就是干这个的 —— 逐字符状态机，处理
+  `\n \t \r \b \f \" \\ \/ \uXXXX`，能应对转义序列正好被切在 chunk 边界的情况；
+  解出多少先渲染多少，视觉上仍是逐字回复
+- Markdown 渲染**先 `escapeHtml` 全量转义、再做行内替换**，所以模型原文里任何 `< > &`
+  都不可能以标签形式进 DOM（`Output._push` 是直接 `innerHTML`，这里是唯一的防线）。
+  引用类边界用了 `一-龥` 字符类做词边界，否则 `3*4=12 还没写完 **` 里的单星号
+  会被当成强调符吃掉半句话
+
+### 提示词重点：日程上下文越长，模型越想「汇报日程」
+
+**现象**：用户连上模型后问「现在几点」，得到的是「你好呀！今天体能训练进行中，马上要结束啦」。
+
+**根因在提示词，不在路由**（实测确认「现在几点」走的是闲聊通路，路由没错）。
+旧版 `chatSystem()` 只有一句「回答**日程相关**问题时以上面的安排为准」——等于没规定
+非日程问题怎么答；加上开头整段人设（桌面宠物、温和、口语化）和一大段日程上下文，
+qwen3:4b 就顺着最显眼的「正在进行」那行往下编。复现过程：日程从 2 条加到 10 条后，
+空历史问「你好呀」，回复变成「你好呀！今天体能训练进行中，要记得 21 点前结束哦～」，
+与用户报的一字不差；同一条提示词下「现在几点」在 temp 0.7 采样里时对时错，
+用户抽中的就是错的那个分支。
+
+**改法**：把「直接回答用户问的那件事」挪到提示词最前面，点名失败场景
+（「尤其不要把『现在几点』这类问题答成日程汇报」），人设退到第二位，
+再补一句「用户没问日程时不用主动汇报正在进行的任务」。没有加 few-shot——
+示例里写死的时刻会被 4B 模型照抄进答案，比没有示例更糟。
+
+**验证**（真实模型，temp 0.7）：空历史「现在几点」3/3、带两轮历史 6/6，
+全部只答时间、不再夹带日程；对照组「我明天有什么要做的」仍能列全 5 条安排。
+`test-llm-live.js` 新增第 7 组把这个场景钉住（软断言：回复里必须出现时间本身）。
+
+### 十几秒的等待必须给反馈
+
+**瓶颈是 prompt eval，不是模型加载。** 意图提示词 643 token，实测
+`prompt_eval 9.5s + eval 3.2s ≈ 13s`，而 `load_duration` 近乎 0。GPU 上快一个量级。
+
+第一次跑联网测试就被这条打脸了：原计划 `intentTimeoutMs: 15000`，实测 **15014ms 撞线**，
+用户那句话被静默丢弃。三处修复：
+
+1. `intentTimeoutMs` 15s → **30s**。卡 15s 会让这功能在没独显的机器上直接不可用
+2. 提取期间也切 `talking` 循环态 + 「让我想想…」气泡，消掉那十几秒的静默。
+   `enqueueTemp` 按 `type + taskId` 去重，`Chat.send` 随后再开一次是空操作，交界处不会闪断
+3. 提取失败时**把原话退回离线通路** —— `Controller` 里原本内联的兜底文案抽成
+   `replyUnparsed(intent)`，两条路复用同一套话术。没有这一步，用户等了十几秒
+   连一句「没太听懂」都收不到
+
+第 3 条同时兜住了超时、连不上、输出解析不出三种失败，以及 `tryRoute` 内部抛异常。
+
+### 徽章、竞态与降级
+
+- **探活序号 `checkSeq`**：慢探活在用户已经关掉开关之后才 resolve，会把状态设成 `ok`，
+  而 `renderLlmStatus` 原本不看 `enabled` 就画「已连接」。加序号后过期结果直接丢弃，
+  `settle` 前再复查一次 `enabled`
+- **「已连接，但没有 xxx」**：模型名是手输的，打错一个字母时服务器仍然是通的，
+  只显示绿色的「已连接（N 个模型）」会骗人。名字不在 `/api/tags` 返回的清单里就单独报
+- **`relaxLocator`（幻觉缓解）**：模型给的定位条件（日期 + 标题 + 时间）查不到时，
+  逐级放宽——先丢时间、再全池按标题查，避免「明明有这条却说要新建」
+- **`maybeHint`**：连不上时每会话最多一条系统提示，靠 `_noted` 去重，
+  离线兜底路径和模型路径都调它，不会重复刷屏
+
+### 设置里那个 `llm` 键不能丢
+
+`desktop_pet_settings` 这一个键里现在装着三样东西：`bg` / `wallpaper` / `llm`。
+麻烦在于既有的 `selectBg` / `clearBg` / `selectWallpaper` 等调用点**只传 `{bg, wallpaper}`** ——
+`save()` 要是照参数原样序列化，用户换个壁纸就会把 llm 开关和端点一起抹掉。
+
+做法是模块级留一个 `llmCurrent`，`save()` 落盘时无脑带上 `llm: llmCurrent`。
+这样所有既有调用点一行都不用改，换壁纸天然不会碰 llm 配置。
+`load()` 返回值里也加了 `llm`，`sanitizeLlmSettings` 兜非法值（`enabled` 只认显式 `true`）。
+
+顺带一提，这个改动让两个存储类测试套件红了：它们原先拿**整串 JSON** 跟期望值比对，
+多一个键就不等。改成只比对关心的字段（`test-wallpaper` 60、`test-stage-background` 31）。
+这是预期后果不是回归 —— 每个设置多键共存，将来再加设置项不用再改一遍期望值。
+
+### talking.webm 怎么来的
+
+用户提供了一段 mp4（`vdio/`，本轮已删）。处理后与现有素材同规格：
+**720×720 / 24fps / 6.04s / VP9-alpha / 1.04MB**。
+
+判 alpha 是否真的在，**看 ffprobe 的 tag 而不是 `pix_fmt`**：VP9-alpha 会被报成
+`pix_fmt=yuv420p`，真正的判据是 `alpha_mode=1`（与 idle / done 等既有素材一致）。
+编码那步 `-auto-alt-ref 0` 不能省，否则 alpha 失效、透明背景变纯黑。
+完整制作流程在使用说明第十七节，素材规格清单在 `videos/README.md`。
+
+`talking` 是**唯一循环播放的临时态**：回复要几秒就循环几秒，由 `endTemp('talking')`
+主动收尾，`tempMs.talking`（90s）只是兜底上限。原设计稿是 `TEMP_VISUALS` 里加一行
+`talking: 'alert'` 复用举手素材，有了真素材就不需要了。
+
+### 与设计稿的偏差
+
+| 设计稿 | 实际 | 原因 |
+| --- | --- | --- |
+| `TEMP_VISUALS` 追加 `talking: 'alert'` | 不做，注册独立状态 + 真实素材 | 用户提供了专门的对话视频；`STATES` 加一项、`playTemp` 支持 `opts.loop` 即可 |
+| `tempMs.talking = 2500` | **90000** | 它是循环临时态，由回复返回时主动收尾，这个值只是兜底上限，取 `chatTimeoutMs` |
+| `intentTimeoutMs: 15000` | **30000** | 见上，15s 在纯 CPU 上直接撞线 |
+| Controller 兜底分支内联文案 | 抽成 `replyUnparsed(intent)` | 模型失败要把原话退回同一条通路，两处复用 |
+| 顶部工具栏放预设模型下拉 | **删除**，模型名在 ⚙ 面板手输（输入框自带 datalist 补全） | 预设只有三个、且只有 `qwen3:4b` 实测过，摆在下拉里等于暗示另两个等价；手输反而能对接任意本地模型 |
+
+### 验证
+
+- 新建 `tests/test-llm.js`（**169 条**）：fetch 全打桩，毫秒级，管逻辑与契约。
+  覆盖 `sanitizeConfig`（恶意 URL / 带凭据 / 非法模型名回落）、`mdToHtml` 的 XSS 与长度上限、
+  `replyReader` 的分块与转义边界、`parseNdjsonChunk` 的半行与垃圾行、
+  意图提取的重试与拒绝路径、Controller 兜底流（开关关 → 原文案且零请求）、
+  `?nollm=1` 调试开关，以及**开关按钮 → 落盘 → 探活**这条用户真正走的路
+- 新建 `tests/test-llm-live.js`（**32 条**）：真连 Ollama 跑完整链路 —— 意图确认门 /
+  流式闲聊（首字延迟、不泄漏 JSON 骨架与思考过程）/ 多轮记忆 / 查询意图走真实 `doQuery` /
+  聊天上下文带上日程 / 明显闲聊不落库 / 问事实不答非所问（见上「提示词重点」）。
+  连不上或没 pull 模型 → 打印原因、**退出码 0**、不拖累离线回归
+- 全量回归 10 个套件全绿：43 / 48 / 60 / 31 / 169 / 33 / 29 / 15 / 35 / 37（e2e 真 Edge），
+  外加联网的 32。**532 项断言**
+- 修掉一处**时间炸弹**：`test-pdf-import` / `test-timetable-import` / `e2e-pdf-import` 三个套件
+  一直在用 `Date.now()` 跑，而 `data/schedule_template.csv` 里那三条写死的单次日程
+  （2026-09-27 / 10-02 / 10-03）到 2026-10-09 全部变成「已过去」被跳过，导入条数 62 → 60，
+  三个套件一起变红。**与本次改动无关，是夹具日期腐烂。** 三处时钟已钉在模板基准日
+  `2026-09-20`（e2e 走 URL `?time=09:00&date=2026-09-20&freeze=1`；注意 `Clock.init`
+  只认带 `time` 的 `date`，光给 `date` 不生效）。**改模板日期时这三处基准日要同步改**
+- 顺带修：`test-wallpaper` / `test-stage-background` 的存储断言过期（见上「设置里那个 `llm` 键不能丢」）
+
+### 已知边界
+
+- **联网测试有抖动**：6 次实跑里 5 次全绿，1 次挂 1 条。4B 模型即使 `temperature=0.1`
+  也会偶尔改判意图，这是模型行为不是代码回归。为此所有分类断言失败时都会打印模型
+  实际返回的意图对象，便于下次一眼分辨
+- **DOM 层没有机器验证**：按钮变绿、面板展开、`talking.webm` 真的循环播起来 ——
+  这些只有 vm 沙箱外的真实浏览器能看到，需要人眼过一遍
+- **纯 CPU 上慢**：一次加日程约 13 秒。功能可用，但谈不上快，这是本地小模型的固有成本
+- **只实测了 `qwen3:4b`**：换其他模型不承诺同等效果，提示词和 `format` 约束都是针对 4b 调的
+- **`file://` 打开需要 `OLLAMA_ORIGINS=*`，且设完必须重启 Ollama 进程**：
+  页面 Origin 为 `null`，Ollama 默认拒绝（实测 403）。环境变量只在进程启动时读一次，
+  托盘里那个跑了很久的 Ollama 不会自己更新——这是「设置明明生效了却还连不上」的常见原因
+- **4B 模型多轮下会复读**：实测 4 次带历史对话里，有 1 次把上一轮的答案原样搬给下一个问题
+  （temp 0.7 采样抖动，非代码回归）。答非所问的提示词级修复挡住了主要场景，
+  但复读这种采样噪声只能靠调低 temperature 或换更大的模型
+- **「现在几点 / 今天几号」仍走模型**：答案在 App 时钟里是确定的，做成离线正则快路
+  （快、永远对、断网可用）会更稳，但那要给意图体系加新成员，本轮没做
+- 输入框 120 字上限未动（指令够用，聊天回复不受限）
+
+---
+
+## 十四、目录重组：测试与工具分家
+
+### 起因：一个名字在说谎
+
+`_scratch/` 是项目起步时起的名字，那会儿里面确实只有临时探针。但到这一轮，它装着
+11 个回归脚本（532 条断言）、两个素材生成器和一份 npm 依赖清单 —— 全是**长期资产**，
+没有一样是「草稿」。名字和内容对不上，看仓库的人会低估这套测试的分量。
+
+于是按职责拆开：`tests/` 放测试，`tools/` 放生成器。
+
+### 绕不开的约束：`node_modules` 只能落在根目录
+
+拆之前先把各脚本的 `require` 列了一遍：
+
+| 脚本 | 外部依赖 |
+| --- | --- |
+| `test-pdf-import.js`、`test-timetable-import.js` | `pdfjs-dist`（解析 PDF，验证导入回环） |
+| `gen-schedule-pdf/gen.js` | `pdfkit`（渲染模板 PDF） |
+| 其余 9 个 | 只有 Node 内置模块 |
+
+Node 找包是**从脚本所在目录逐级向上**找 `node_modules`。`tests/` 与 `tools/` 是平行的兄弟目录，
+依赖留在 `tools/` 里，`tests/` 那两个 PDF 测试就找不到 `pdfjs-dist`。唯一的共同祖先是仓库根目录，
+所以 `package.json` / `package-lock.json` / `node_modules` 一起提上来。
+
+这不是我原本想选的布局（根目录多个 `package.json`，容易让人以为应用要装东西），
+所以 `description` 里写死了「desktop-pet/ 本体零依赖，跑应用不需要这个文件」。
+
+### 动生成产物时，改一处不够
+
+`desktop-pet/schedule/scheduleTemplate.js` 和 `desktop-pet/lib/pdfjs/cmaps.js` 都是**生成产物**，
+头部注释写着生成器路径。这两处必须改**两遍**：一遍改产物本身（让当前文件是对的），
+一遍改生成器里的模板串（让下次重新生成不会退回去）。只改前者，跑一次 `npm run gen:pdf`
+旧路径就写回来了。
+
+同理，`gen-cmaps.js` 里 `path.join(ROOT, '_scratch', 'node_modules', ...)` 是**代码不是注释**，
+漏掉它生成器直接跑不起来 —— 这类只在「搬目录」时才会暴露的引用，注释和代码得分开数。
+
+### 新增：一条命令跑全套
+
+原来要验回归，得从文档里复制 10 行命令。新增 `tests/run.js`：起子进程跑完 9 个离线套件、
+汇总成一张表，任一失败即以退出码 1 结束；失败时还会把该套件里的 `✗ / 失败 / Error` 行摘出来，
+省得再手跑一遍才知道是崩了还是断言挂了。
+
+`npm test` 只跑离线的 9 个（463 条，几秒出结果）。要真浏览器 / 真模型的各自单独跑：
+`npm run test:e2e`、`npm run test:live`，或 `npm run test:all` 一起。
+
+两个 PDF 测试原本是裸 `require('pdfjs-dist/...')`，`node_modules` 不在时会甩一坨
+`MODULE_NOT_FOUND` 堆栈。既然现在 `npm test` 会连它们一起跑，加了 try/catch 换成一句人话。
+
+### 删除项
+
+| 删除项 | 大小 | 理由 |
+| --- | --- | --- |
+| `_scratch/_shot/` | 104K | e2e 与 preview 的产物。`.gitignore` 已排除，跑一次就重建 |
+
+审计过的其余候选，用户选择保留：
+
+- `claude_DesktopNotepad/`（540B）——与应用无关，但使用说明的目录树里本来就登记着它，删了要同步改文档
+- `_scratch/node_modules/`（51M）——删了不污染仓库（本来就 gitignore），但重新生成模板 PDF 前必须联网重装
+
+### 顺带发现：两个素材是同一份文件
+
+`videos/studying.webm` 与 `videos/working.webm` 的 **md5 完全相同**（`0af309c6...`，各 638KB）。
+`working` 是真实状态（工作类与通用类任务都走它），**不能删** —— 删了会掉到 SVG 兜底。
+所以只记录、不动。真想要两套独立动画，换掉 `working.webm` 即可。
+
+### 验证
+
+移动后全量重跑，**没有一处因为换目录而挂**：
+
+| 套件 | 结果 |
+| --- | --- |
+| 9 个离线套件（`npm test`） | 463 / 0 |
+| `e2e-pdf-import.js` | 37 / 0 |
+| `test-llm-live.js`（真 Ollama） | 32 / 0 |
+
+路径深度是这次敢直接搬的关键：`tests/` 与 `tools/gen-schedule-pdf/` 跟原来的
+`_scratch/` 和 `_scratch/gen-schedule-pdf/` **同层**，脚本里那句
+`path.join(__dirname, '..', 'desktop-pet')` 一个字都不用改 —— 事前逐条核对过才动的手。
+
+`.gitignore` 的临时产物规则跟着换位（`tests/_edge_*/`、`tests/_shot/`、`tools/_shot/`），
+用真实目录验证过三条规则都生效（空路径字符串测不出来，`check-ignore` 对不存在的目录会漏判）。
+
+### 文档处理：路径改，叙述不改
+
+本篇此前所有条目里的 `_scratch/...` 路径**已统一改写为新路径**，否则读者按图索骥会找不到文件。
+但**叙述内容没有动**：第六篇那份「5 个 vm 测试脚本」「共 23 文件」是当时的实情，
+改了就是伪造记录 —— 这正是开头那句「文中的测试通过数是当时快照」的意思。
+第十篇提到的 `_edge_parse/` 等三个目录同理，是当时确实存在过、后来被删掉的东西。

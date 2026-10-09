@@ -1,6 +1,6 @@
 /*
  * 无头测试：验证 settings.js 的舞台背景逻辑
- * 运行： node _scratch/test-stage-background.js
+ * 运行： node tests/test-stage-background.js
  */
 'use strict';
 const fs = require('fs');
@@ -108,6 +108,15 @@ function check(name, cond, extra) {
   else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '  -> ' + extra : '')); }
 }
 
+/* 存储里除 bg / wallpaper 外还带 llm 配置（后加的字段），
+   断言只比对测试关心的键，避免每加一个设置就改一遍期望值 */
+function storedOk(expect) {
+  let got;
+  try { got = JSON.parse(store[App.Config.settingsKey]); } catch (e) { return false; }
+  return got !== null && typeof got === 'object' &&
+    Object.keys(expect).every(k => got[k] === expect[k]);
+}
+
 const S = App.Settings;
 const PRESET = 'data/backgrounds/bg1.jpg';
 
@@ -127,7 +136,7 @@ const bg = els.stage.style.backgroundImage;
 check('inline style 含压暗层 + 图片', bg.indexOf('linear-gradient') === 0 && bg.indexOf('url("' + PRESET + '")') > 0, bg);
 check('加了 has-bg class', els.stage.classList.contains('has-bg'));
 check('清除按钮显示', els['btn-bg-clear'].hidden === false);
-check('写入 settingsKey', store[App.Config.settingsKey] === JSON.stringify({ bg: PRESET, wallpaper: null }),
+check('写入 settingsKey', storedOk({ bg: PRESET, wallpaper: null }),
   store[App.Config.settingsKey]);
 check('未污染日程 key', store[App.Config.desktop_pet_v2] === undefined && store['desktop_pet_v2'] === undefined);
 check('给出用户反馈', msgs.some(m => m.startsWith('system:')) && msgs.some(m => m.startsWith('bubble:')), JSON.stringify(msgs));
@@ -150,7 +159,7 @@ msgs.length = 0;
 S.clearBg();
 check('inline style 清空', els.stage.style.backgroundImage === '', JSON.stringify(els.stage.style.backgroundImage));
 check('has-bg 移除', !els.stage.classList.contains('has-bg'));
-check('写入 null', store[App.Config.settingsKey] === JSON.stringify({ bg: null, wallpaper: null }),
+check('写入 null', storedOk({ bg: null, wallpaper: null }),
   store[App.Config.settingsKey]);
 check('清除按钮隐藏', els['btn-bg-clear'].hidden === true);
 const sel4 = els['bg-picker'].querySelectorAll('[data-path]').filter(b => b.classList.contains('selected'));
@@ -163,7 +172,7 @@ check('仍无背景', els.stage.style.backgroundImage === '');
 console.log('\n=== 用例 6：非法路径被拒绝 ===');
 msgs.length = 0;
 S.select('data/backgrounds/../evil.jpg');
-check('未写入 localStorage', store[App.Config.settingsKey] === JSON.stringify({ bg: null, wallpaper: null }));
+check('未写入 localStorage', storedOk({ bg: null, wallpaper: null }));
 check('未给出误导性反馈', msgs.length === 0, JSON.stringify(msgs));
 
 console.log('\n=== 用例 7：配额满时优雅失败 ===');

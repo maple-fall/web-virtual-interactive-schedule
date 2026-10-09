@@ -1,10 +1,11 @@
 /*
- * settings.js — 应用设置：舞台背景 + 界面壁纸
+ * settings.js — 应用设置：舞台背景 + 界面壁纸 + 本地大模型
  * 独立 localStorage 键，不掺进日程数据（desktop_pet_v2 在每次变更时整体重写）
  *
- * 两者作用范围不同，互不覆盖：
+ * 三者作用范围不同，互不覆盖：
  *   bg        只作用于 #stage；必须是 CSS 属性而非子元素，因为 Animation.init 会覆盖 #stage innerHTML
  *   wallpaper 作用于 body，是整窗底层壁纸；has-wallpaper class 让面板转半透明透出纹理
+ *   llm       本地模型开关与端点，运行期的唯一事实源是 App.LLM.cfg，这里只负责落盘与面板
  */
 (function () {
   'use strict';
@@ -49,8 +50,40 @@
     return null;   // 不在白名单，视为无壁纸
   }
 
+  /* ---------------- 本地大模型配置 ----------------
+     校验规则只写一份，在 llm.js（sanitizeConfig）；这里兜住「llm.js 没加载」的极端情况。
+     llmCurrent 只用于落盘：运行期谁都可以改 App.LLM.cfg，落盘前一定先过 currentLlm() */
+
+  var llmCurrent = { enabled: false, endpoint: 'http://127.0.0.1:11434', model: 'qwen3:4b' };
+
+  function sanitizeLlm(v) {
+    if (App.LLM && App.LLM.sanitizeConfig) return App.LLM.sanitizeConfig(v);
+    var o = (v && typeof v === 'object') ? v : {};
+    return {
+      enabled: o.enabled === true,
+      endpoint: 'http://127.0.0.1:11434',
+      model: (typeof o.model === 'string' && o.model) ? o.model : 'qwen3:4b'
+    };
+  }
+
+  function currentLlm() {
+    return sanitizeLlm((App.LLM && App.LLM.cfg) ? App.LLM.cfg : llmCurrent);
+  }
+
+  /* 面板输入 + 当前开关状态 -> 一份完整配置（enabled 只认运行期状态，面板里没有这个控件） */
+  function readLlmPanel() {
+    var base = currentLlm();
+    var ep = document.getElementById('llm-endpoint');
+    var md = document.getElementById('llm-model');
+    return {
+      enabled: base.enabled,
+      endpoint: (ep && ep.value.trim()) || base.endpoint,
+      model: (md && md.value.trim()) || base.model
+    };
+  }
+
   function load() {
-    var empty = { bg: null, wallpaper: null };
+    var empty = { bg: null, wallpaper: null, llm: sanitizeLlm(null) };
     try {
       var raw = localStorage.getItem(App.Config.settingsKey);
       if (!raw) return empty;
@@ -58,18 +91,21 @@
       if (!data || typeof data !== 'object') return empty;
       return {
         bg: typeof data.bg === 'string' ? data.bg : null,
-        wallpaper: sanitizeWallpaper(data.wallpaper)
+        wallpaper: sanitizeWallpaper(data.wallpaper),
+        llm: sanitizeLlm(data.llm)     // 被篡改成公网地址时在这里回落到默认端点
       };
     } catch (e) {
       return empty;
     }
   }
 
-  /* 整存状态：两个字段一起写，避免一处改动抹掉另一处 */
+  /* 整存状态：三个字段一起写，避免一处改动抹掉另一处。
+     所以下面那些只传 {bg, wallpaper} 的老调用点不必改——llmCurrent 自动补上 */
   function save(state) {
     try {
       localStorage.setItem(App.Config.settingsKey, JSON.stringify({
-        bg: state.bg, wallpaper: state.wallpaper
+        bg: state.bg, wallpaper: state.wallpaper,
+        llm: state.llm !== undefined ? state.llm : llmCurrent
       }));
       return true;
     } catch (e) {
@@ -81,15 +117,129 @@
   App.Settings = {
     bg: null,
     wallpaper: null,
+    llm: llmCurrent,
 
     init: function () {
       var s = load();
       this.bg = s.bg;
       this.wallpaper = s.wallpaper;
+      this.llm = s.llm;
+      llmCurrent = s.llm;
       this.buildPicker();
       this.applyToStage();
       this.applyWallpaper();
       this.bindUI();
+      this.syncLlmUI();
+    },
+
+    /* ---- 本地大模型 ---- */
+
+    /* 面板/开关的唯一落盘入口。over 用于覆盖单项（如顶部下拉换模型）。
+       落盘后交给 App.LLM.applyConfig，由它决定要不要重新探活 */
+    saveLlm: function (over) {
+      var v = readLlmPanel();
+      if (over) {
+        for (var k in over) {
+          if (over.hasOwnProperty(k)) v[k] = over[k];
+        }
+      }
+      v = sanitizeLlm(v);
+      llmCurrent = v;
+      this.llm = v;
+      if (!save({ bg: this.bg, wallpaper: this.wallpaper, llm: v })) {
+        App.Output.error('本地模型设置保存失败，浏览器存储空间可能已满。');
+      }
+      if (App.LLM) App.LLM.applyConfig(v);
+      this.syncLlmUI();
+      return v;
+    },
+
+    /* 顶部开关：翻转 enabled。真正的落盘与探活都在 saveLlm/applyConfig 里，
+       这里只负责文案与提示 */
+    toggleLlm: function () {
+      var on = !(App.LLM && App.LLM.isEnabled());
+      if (App.LLM) App.LLM.setEnabled(on);        // 内部会回调 saveLlm -> applyConfig
+      else this.saveLlm({ enabled: on });
+
+      this.syncLlmUI();
+      App.Output.system(on
+        ? '本地模型已开启，正在检测连接…'
+        : '本地模型已关闭，回到离线模式。');
+      App.Bubble.say(on ? '本地模型开啦～' : '模型关掉了', { ms: 2500 });
+    },
+
+    recheckLlm: function () {
+      if (!App.LLM) return;
+      if (!App.LLM.isEnabled()) {
+        App.Bubble.say('先打开「本地模型」开关哦', { ms: 3000 });
+        return;
+      }
+      App.LLM.recheck();
+    },
+
+    /* 开关按钮 / 输入框 / 徽章与运行期状态对齐。任何入口改完配置都走这里 */
+    syncLlmUI: function () {
+      var cfg = currentLlm();
+
+      var btn = document.getElementById('btn-llm');
+      if (btn) {
+        btn.textContent = cfg.enabled ? '本地模型：开' : '本地模型：关';
+        btn.classList.toggle('on', cfg.enabled);
+        btn.setAttribute('aria-pressed', cfg.enabled ? 'true' : 'false');
+      }
+
+      // 正在打字时不要回写，避免把用户输入的一半覆盖掉
+      var ep = document.getElementById('llm-endpoint');
+      if (ep && document.activeElement !== ep) ep.value = cfg.endpoint;
+
+      var md = document.getElementById('llm-model');
+      if (md && document.activeElement !== md) md.value = cfg.model;
+
+      this.renderLlmStatus(App.LLM ? App.LLM.status : 'off',
+        App.LLM && App.LLM.models ? App.LLM.models.length : 0,
+        (App.LLM && App.LLM.models) || [], cfg.model);
+    },
+
+    /* models / model 用来查「服务器在线，但你填的模型它没有」——
+       模型名现在完全靠手输，打错一个字母的话只看到绿色的「已连接」，
+       直到每次提问都失败才发现，所以这个徽章必须说清楚 */
+    renderLlmStatus: function (status, count, models, model) {
+      var badge = document.getElementById('llm-status');
+      if (!badge) return;
+      var missing = (models && models.length && model) ? models.indexOf(model) < 0 : false;
+      var text, cls;
+      if (status === 'ok' && missing) {
+        text = '已连接，但没有 ' + model;
+        cls = 'llm-status llm-status-bad';
+      } else if (status === 'ok') {
+        text = '已连接（' + (count == null ? 0 : count) + ' 个模型）';
+        cls = 'llm-status llm-status-ok';
+      } else if (status === 'checking') {
+        text = '检测中…';
+        cls = 'llm-status';
+      } else if (status === 'unreachable') {
+        text = '未连接';
+        cls = 'llm-status llm-status-bad';
+      } else if (status === 'unknown') {
+        text = '未检测';
+        cls = 'llm-status llm-status-off';
+      } else {
+        text = '已关闭';
+        cls = 'llm-status llm-status-off';
+      }
+      badge.className = cls;
+      badge.textContent = text;
+
+      // 连上后把可用模型列表灌进 datalist，面板里换模型不用去命令行查
+      var dl = document.getElementById('llm-models');
+      if (dl && App.LLM && App.LLM.models && App.LLM.models.length) {
+        dl.innerHTML = '';
+        App.LLM.models.forEach(function (name) {
+          var o = document.createElement('option');
+          o.value = name;
+          dl.appendChild(o);
+        });
+      }
     },
 
     /* 有背景：压暗层 + 图片；无背景：清空 inline style，交回样式表 */
@@ -362,22 +512,24 @@
 
       var picker = document.getElementById('bg-picker');
       var wPicker = document.getElementById('wallpaper-picker');
+      var lPicker = document.getElementById('llm-picker');
       var fileInput = document.getElementById('file-wallpaper');
       var btnBg = document.getElementById('btn-bg');
       var btnClear = document.getElementById('btn-bg-clear');
       var btnWp = document.getElementById('btn-wallpaper');
       var btnWpClear = document.getElementById('btn-wallpaper-clear');
 
-      // 两个面板互斥：展开一个就收起另一个（同为 flex-basis:100%，同时展开会挤成两行）
-      function toggle(panel, other) {
+      // 三个面板互斥：展开一个就收起其余（同为 flex-basis:100%，同时展开会挤成两行）
+      function toggle(panel, others) {
         panel.hidden = !panel.hidden;
-        if (!panel.hidden && other) other.hidden = true;
+        if (panel.hidden) return;
+        others.forEach(function (o) { if (o) o.hidden = true; });
       }
       if (btnBg && picker) {
-        btnBg.addEventListener('click', function () { toggle(picker, wPicker); });
+        btnBg.addEventListener('click', function () { toggle(picker, [wPicker, lPicker]); });
       }
       if (btnWp && wPicker) {
-        btnWp.addEventListener('click', function () { toggle(wPicker, picker); });
+        btnWp.addEventListener('click', function () { toggle(wPicker, [picker, lPicker]); });
       }
 
       // 事件委托：从点击目标向上找带 data-path 的按钮（不依赖 closest）
@@ -426,6 +578,36 @@
 
       if (btnClear) btnClear.addEventListener('click', function () { self.clearBg(); });
       if (btnWpClear) btnWpClear.addEventListener('click', function () { self.clearWallpaper(); });
+
+      /* ---- 本地大模型 ---- */
+      var btnLlm = document.getElementById('btn-llm');
+      var btnLlmCfg = document.getElementById('btn-llm-config');
+      var llmSave = document.getElementById('llm-save');
+      var llmRecheck = document.getElementById('llm-recheck');
+
+      if (btnLlm) {
+        btnLlm.addEventListener('click', function () { self.toggleLlm(); });
+      }
+      if (btnLlmCfg && lPicker) {
+        btnLlmCfg.addEventListener('click', function () {
+          toggle(lPicker, [picker, wPicker]);
+          if (!lPicker.hidden) self.syncLlmUI();     // 打开时回填端点/模型/徽章
+        });
+      }
+      if (llmSave) {
+        llmSave.addEventListener('click', function () {
+          var v = self.saveLlm();
+          App.Output.system('本地模型设置已保存（' + v.endpoint + '，' + v.model + '）。');
+        });
+      }
+      if (llmRecheck) {
+        llmRecheck.addEventListener('click', function () { self.recheckLlm(); });
+      }
+
+      // 状态徽章跟随探活结果：checking -> ok/unreachable/off
+      if (App.bus && App.bus.on) {
+        App.bus.on('llm:status', function () { self.syncLlmUI(); });
+      }
     }
   };
 })();

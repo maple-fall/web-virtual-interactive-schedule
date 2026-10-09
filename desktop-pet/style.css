@@ -211,6 +211,63 @@ body.has-wallpaper .day-head { background: #171d33; }
 .bg-import:hover { border-color: #4a5a96; color: var(--text); }
 .bg-none.selected { border-color: var(--active); border-style: solid; color: var(--text); }
 
+/* ---------------- 本地模型：开关、下拉、设置面板 ---------------- */
+
+/* 开关态是唯一的「开/关」视觉信号，所以给足对比度：开=绿边绿字，关=灰扑扑 */
+#btn-llm.on {
+  border-color: var(--active);
+  color: var(--active);
+  background: rgba(124, 240, 168, .1);
+}
+#btn-llm.on:hover { border-color: var(--active); background: rgba(124, 240, 168, .16); }
+
+/* 面板沿用 .bg-picker 的横排布局，只是内容更宽 */
+.llm-panel { align-items: flex-start; }
+.llm-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.llm-input {
+  border: 1px solid var(--line);
+  background: var(--bg-panel-input, rgba(0, 0, 0, .25));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  min-width: 200px;
+}
+.llm-input:focus { outline: none; border-color: #4d64b8; }
+
+.llm-actions { display: flex; align-items: center; gap: 8px; }
+
+.llm-status {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.llm-status-ok { color: var(--active); border-color: var(--active); }
+.llm-status-bad { color: var(--danger); border-color: rgba(255, 107, 138, .6); }
+.llm-status-off { opacity: .75; }
+
+.llm-note {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.llm-note code {
+  background: rgba(0, 0, 0, .35);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
 .pet-video,
 .pet-svg {
   position: absolute;
@@ -459,6 +516,18 @@ body.has-wallpaper .day-head { background: #171d33; }
   font-size: 12px;
 }
 
+/* 流式回复中：末尾跟一个闪烁光标，让「还在说」这件事看得见 */
+.msg-pet.streaming::after {
+  content: '▍';
+  margin-left: 2px;
+  color: var(--muted);
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
 .query-list {
   list-style: none;
   margin: 6px 0 2px;
@@ -641,6 +710,35 @@ body.has-wallpaper .day-head { background: #171d33; }
 @keyframes arms-up {
   0%, 100% { transform: rotate(0); }
   50% { transform: rotate(-35deg) translateY(-6px); }
+}
+
+/* ---- talking（本地模型交流中）：交替比划 + 点头，一直循环到回复结束 ----
+   有 videos/talking.webm 时走视频；这段只在 SVG 降级模式（?novideo=1 或视频加载失败）
+   下出现，所以要和其余状态用同一套关键帧写法 */
+.stage[data-state="talking"] .pet-all {
+  animation: talk-bob 1.6s ease-in-out infinite;
+}
+.stage[data-state="talking"] .g-head {
+  transform-origin: 50% 85%;
+  animation: talk-nod 1.6s ease-in-out infinite;
+}
+.stage[data-state="talking"] .arm-l,
+.stage[data-state="talking"] .arm-r {
+  transform-origin: 50% 20%;
+  animation: talk-gesture .9s ease-in-out infinite;
+}
+.stage[data-state="talking"] .arm-r { animation-delay: .45s; }
+@keyframes talk-bob {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-2px) scale(1.01, 1.015); }
+}
+@keyframes talk-nod {
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(3deg); }
+}
+@keyframes talk-gesture {
+  0%, 100% { transform: rotate(0) translateY(0); }
+  50% { transform: rotate(-22deg) translateY(-4px); }
 }
 @keyframes sparkle {
   0%, 100% { opacity: 0; transform: scale(.4) rotate(0); }

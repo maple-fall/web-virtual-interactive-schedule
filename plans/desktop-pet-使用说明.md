@@ -23,6 +23,7 @@
 | 改代码 / 看文件结构 | [十四、项目文件结构](#十四项目文件结构) · [十五、使用建议](#十五使用建议) |
 | **在手机 / 平板上用** | [十六、移动端使用](#十六移动端使用) |
 | **换成自己的角色形象** | [十七、虚拟形象自定义](#十七虚拟形象自定义) |
+| **接一个本地大模型来聊天** | [十八、本地大模型（Ollama）](#十八本地大模型ollama) |
 
 ---
 
@@ -332,7 +333,7 @@ document.getElementById('stage').dataset.mode      // 'video' 或 'svg'
 document.getElementById('stage').dataset.state     // 当前状态，如 'studying'
 ```
 
-### 六种状态
+### 七种状态
 
 **全部由系统本地时间 + 你的日程表现场推导**，不需要你手动切换。分基础态和临时态两类：
 
@@ -351,6 +352,10 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 | `alert` | 提醒 | 任务**刚开始**的 90 秒内 | 举手挥动 + 感叹号 + 气泡播报 | `alert.webm` | 5 秒 |
 | `done` | 任务完成 | 任务**刚结束**时 | 闭眼笑 + 飘心 + 完成播报 | `done.webm` | 3.5 秒 |
 | `refuse` | 温馨提醒 | 任务进行中你提出娱乐请求 | 抖动 + 红光 + 拒绝话术 | `refuse.webm` | 2.5 秒 |
+| `talking` | 交流中 | 本地模型正在理解 / 组织回复 | 说话、讲解手势 | `talking.webm` | 循环到回复结束 |
+
+> `talking` 只在**开启本地大模型**（[第十八节](#十八本地大模型ollama)）后才会出现，且是唯一**循环播放**的临时态：
+> 回复要几秒就循环几秒，由回复返回时主动收掉，默认 90 秒只是兜底上限。开关关着时它永远不会出现。
 
 **另外两个提醒态**：`warnStart`（开始前 5 分钟提醒）和 `warnEnd`（结束前 10 分钟打气）。
 它们**不占独立素材**，直接复用 `alert` / `done` 的视频，只把徽章文字换成「提醒」和「加油」。
@@ -504,7 +509,7 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 **排查顺序：**
 
 1. **先按 `Ctrl+F5` 强制刷新**——如果你在素材生成之前就打开过页面，看到的是旧状态。
-2. 确认 `desktop-pet/videos/` 目录下确实有 6 个 `.webm` 文件（打开文件夹看一眼）。
+2. 确认 `desktop-pet/videos/` 目录下确实有 7 个 `.webm` 文件（打开文件夹看一眼）。
 3. **确认你是在浏览器里打开的，不是 IDE 的预览窗口**。IDE 预览不是真正的 `file://` 页面，读不到同级的 `videos/` 目录，必然降级成猫。
 4. 想强制对比两种效果：加参数 `index.html?novideo=1` 会主动使用小猫。
 
@@ -517,7 +522,7 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 | 键名 | 存什么 |
 | --- | --- |
 | `desktop_pet_v2` | 你的日程数据 |
-| `desktop_pet_settings` | 舞台背景和界面壁纸的选择 |
+| `desktop_pet_settings` | 舞台背景、界面壁纸的选择，以及本地模型的开关/地址/模型名 |
 
 关掉浏览器不会丢。**但清浏览器数据会丢**，所以建议定期点 **「导出备份」** 存一份 JSON。需要时点 **「导入备份」** 选回那个文件即可。
 
@@ -584,6 +589,7 @@ var WALLPAPER_OVERLAY = 'linear-gradient(rgba(15,19,34,.35), rgba(15,19,34,.35))
 | `date` | `index.html?date=2026-09-21` | 假装今天是某一天（配合 `time` 用） |
 | `freeze=1` | `index.html?time=14:30&freeze=1` | 冻结时钟，时间停在 `time` 那一刻不再前进。**必须和 `time` 一起写**，单独写不生效 |
 | `novideo=1` | `index.html?novideo=1` | 强制使用内置 SVG 小猫动画 |
+| `nollm=1` | `index.html?nollm=1` | 本机跑着 Ollama 但想验证**离线路径**：即使开关开着也完全不连模型，待机、加日程、闲聊全部走原来的正则通路 |
 
 **演示时最有用的一招**：先导入一份日程表，然后 `?time=<某个任务开始前一分钟>&freeze=1` 打开，再把 `freeze` 去掉刷新，就能完整看到"提醒 → 任务中 → 完成"的整条链路。
 
@@ -607,24 +613,37 @@ var WALLPAPER_OVERLAY = 'linear-gradient(rgba(15,19,34,.35), rgba(15,19,34,.35))
 
 ```
 AIcompete/
-├── desktop-pet/        ← 应用本体，自包含，双击 index.html 就能跑
-├── plans/              两篇文档：本篇使用说明 + 开发记录
-├── _scratch/           回归测试脚本 + 模板生成工具，不参与运行
-├── .gitignore          排除 _scratch 的依赖与临时产物
+├── desktop-pet/        ← 应用本体，自包含，双击 index.html 就能跑；零依赖、零构建
+├── plans/              两篇文档：本篇使用说明 + 开发记录（改动的原因与验证数据）
+├── tests/              11 个回归测试脚本 + run.js 总入口（不参与运行）
+├── tools/              模板 PDF / 内置 CMap 的生成器 + 排版预览工具（不参与运行）
+├── package.json        dev-only：测试与生成命令的 npm 入口，desktop-pet/ 不需要它
+├── node_modules/       tools/ 与两个 PDF 测试的 dev 依赖，已被 .gitignore 排除
+├── .gitignore          排除 dev 依赖与测试临时产物
 └── claude_DesktopNotepad/   Claude Code 配置样例，与应用无关
 ```
 
-改完代码想验一下有没有弄坏东西，在 `AIcompete/` 下挨个跑（纯 Node，几秒出结果，不需要浏览器）：
+改完代码想验一下有没有弄坏东西，一条命令跑完全部 9 个离线套件（463 条断言，纯 Node，几秒出结果、不开浏览器）：
 
 ```bash
-node _scratch/test-parse-time.js        # 中文时间/日期解析
-node _scratch/test-copy-day.js          # 整日复制：冲突成对询问 + 重叠/更换两种收尾
-node _scratch/test-pip.js               # 画中画
-node _scratch/test-stage-background.js  # 舞台背景
-node _scratch/test-wallpaper.js         # 界面壁纸
-node _scratch/test-warn-reminders.js    # 提醒机制
-node _scratch/test-pdf-import.js        # PDF 导入：模板回环解析 + 与 CSV 路径等价（需先 npm install）
-node _scratch/test-timetable-import.js  # 课表导入：网格课表识别、单双周、跨页续接、日期推断
+npm test
+```
+
+输出是一张表，`失败` 为 0 就算过。首次使用先在仓库根目录 `npm install` —— 装的是 dev 侧的
+`pdfkit` / `pdfjs-dist` 两个包，**`desktop-pet/` 本体依然什么都不用装**。
+
+想只跑某一个，或看清楚每个脚本管什么：
+
+```bash
+node tests/test-parse-time.js        # 中文时间/日期解析
+node tests/test-copy-day.js          # 整日复制：冲突成对询问 + 重叠/更换两种收尾
+node tests/test-pip.js               # 画中画
+node tests/test-stage-background.js  # 舞台背景
+node tests/test-wallpaper.js         # 界面壁纸
+node tests/test-warn-reminders.js    # 提醒机制
+node tests/test-pdf-import.js        # PDF 导入：模板回环解析 + 与 CSV 路径等价
+node tests/test-timetable-import.js  # 课表导入：网格课表识别、单双周、跨页续接、日期推断
+node tests/test-llm.js               # 本地大模型接入层（fetch 全打桩，不联网）
 ```
 
 每个脚本末尾都会打印 `N 通过 / M 失败`，`M` 为 0 就算过。
@@ -634,11 +653,12 @@ node _scratch/test-timetable-import.js  # 课表导入：网格课表识别、�
 只跑其余用例、**不报错**——但也意味着课表识别那部分没被验证。要恢复覆盖，
 把教务系统导出的同名文件放回 `data/` 即可。
 
-另外两个需要真浏览器的（改动导入/模板相关代码时跑）：
+剩下三个不在 `npm test` 里——它们要真实浏览器或真实模型，各自单独跑（`npm run test:all` 可把前两个一起跑）：
 
 ```bash
-node _scratch/e2e-pdf-import.js         # 真 Edge 打开 file://，走完整导入链路（会自动开关浏览器）
-node _scratch/preview-template.js       # 把模板 PDF 渲染成 PNG 以便目视检查排版
+npm run test:e2e      # 真 Edge 打开 file://，走完整导入链路（会自动开关浏览器）
+npm run test:live     # 真连 Ollama 跑一遍完整链路（需先启动；连不上自动跳过）
+npm run preview       # 把模板 PDF 渲染成 PNG，落在 tools/_shot/ 便于目视检查排版
 ```
 
 `desktop-pet/` 内部：
@@ -646,9 +666,9 @@ node _scratch/preview-template.js       # 把模板 PDF 渲染成 PNG 以便目�
 ```
 desktop-pet/
 ├── index.html                     界面结构 + 按依赖顺序加载脚本
-├── style.css                      深色主题 + 六态 CSS 动画 + 壁纸半透明规则
+├── style.css                      深色主题 + 各状态 CSS 动画 + 壁纸半透明规则
 ├── app.js                         核心：Config / 事件总线 / 工具 / 时钟 / 计划表渲染 / 对话编排
-├── settings.js                    舞台背景 + 界面壁纸的设置与导入
+├── settings.js                    舞台背景 + 界面壁纸 + 本地模型开关的读写与设置面板
 ├── pip.js                         画中画（文档画中画 API，把舞台搬进独立小窗）
 ├── lib/pdfjs/                     vendored pdf.js 3.11.174（legacy 构建，PDF 文字层提取）
 │   ├── cmaps.js                   内置 GB 系 CMap（生成产物）：让未内嵌字体的中文 PDF 能提出文字
@@ -667,28 +687,31 @@ desktop-pet/
 ├── dialog/
 │   ├── input.js                   中文自然语言解析（意图/日期/时间/时长/标题抽取）
 │   ├── output.js                  对话消息渲染
-│   └── bubble.js                  角色头顶气泡
+│   ├── bubble.js                  角色头顶气泡
+│   └── llm.js                     本地大模型（Ollama）接入：探活、意图提取、流式闲聊
 ├── data/
 │   ├── schedule_template.pdf      「下载模板」下载的模板（一次生成，静态文件）
 │   ├── schedule_template.csv      同一份模板的 CSV 版本，格式参考用
 │   ├── 梁浩贤(2026-2027-1)课表.pdf  教务系统导出的网格课表样本（课表导入的测试用例）
 │   ├── backgrounds/bg1.jpg        舞台背景预设
 │   └── wallpapers/wall1.jpg       界面壁纸预设
-└── videos/                        角色动画素材 6 个 + 素材说明
+└── videos/                        角色动画素材 7 个 + 素材说明
 ```
 
 **没有构建步骤、不用装任何东西**（除 `lib/pdfjs/` 下 vendored 的 pdf.js 外没有第三方依赖）——
 所有 JS 都是普通 `<script>` 标签按顺序加载，`window.App` 上挂着各个模块。
 改完代码直接 `Ctrl+F5` 就生效。
 
-模板 PDF 和内置 CMap 都是**离线一次性生成**的，不是运行时生成：在 `_scratch/` 下 `npm install` 后
+模板 PDF 和内置 CMap 都是**离线一次性生成**的，不是运行时生成：先在仓库根目录 `npm install`，然后
 
-- `npm run gen:pdf` —— 读 `gen-schedule-pdf/gen.js`，用 pdfkit + 系统黑体渲染表格，
+- `npm run gen:pdf` —— 读 `tools/gen-schedule-pdf/gen.js`，用 pdfkit + 系统黑体渲染表格，
   一次刷新**三份产物**：`data/schedule_template.pdf`、`data/schedule_template.csv`、
   `schedule/scheduleTemplate.js`（PDF 字节的 base64，供「下载模板」按钮用）。
   **改模板必须重跑这一条**：只替换 `data/` 下的 PDF 不会生效，按钮下载的仍是脚本里那份
-- `npm run gen:cmaps` —— 读 `gen-schedule-pdf/gen-cmaps.js`，把 pdfjs-dist 里的 GB 系 CMap
+- `npm run gen:cmaps` —— 读 `tools/gen-schedule-pdf/gen-cmaps.js`，把 pdfjs-dist 里的 GB 系 CMap
   打包成 `lib/pdfjs/cmaps.js`（33 个文件，约 380KB）。**要支持新编码族（如繁体 CNS）时改这个脚本**
+
+两个生成器都写在 `tools/` 下，`npm run` 从仓库根目录执行即可，不必 `cd` 进任何子目录。
 
 ---
 
@@ -824,13 +847,13 @@ App Store 里搜 **Koder**（或类似的代码编辑器 App，关键词 "local 
 
 | 想做的事 | 要动的东西 | 难度 |
 | --- | --- | --- |
-| 换成自己画的角色 | 替换 `videos/` 下 6 个视频文件 | 不用改代码 |
+| 换成自己画的角色 | 替换 `videos/` 下 7 个视频文件 | 不用改代码 |
 | 换个造型 / 改动作 | 改 `character/animation.js` 的 SVG + `style.css` 的动画 | 改代码 |
 | 改状态名称 / 时长 / 归类 | 改 `app.js` 的 `App.Config` | 改配置 |
 
 ### 换成自己的角色（不用改代码）
 
-1. 准备好 6 段动画，按下面的文件名命名
+1. 准备好 7 段动画，按下面的文件名命名
 2. 丢进 `desktop-pet/videos/`，覆盖同名文件
 3. `Ctrl+F5` 强制刷新（避免缓存）
 
@@ -842,6 +865,7 @@ App Store 里搜 **Koder**（或类似的代码编辑器 App，关键词 "local 
 | `alert.webm` | 提醒（任务开始） |
 | `done.webm` | 完成（任务结束） |
 | `refuse.webm` | 拒绝（任务时段摸鱼） |
+| `talking.webm` | 交流中（本地模型思考 / 回答时，见[第十八节](#十八本地大模型ollama)） |
 
 **命名严格区分大小写，必须完全一致。** 文件名不对 = 那个状态找不到素材。
 
@@ -854,12 +878,13 @@ App Store 里搜 **Koder**（或类似的代码编辑器 App，关键词 "local 
 - **尺寸 720×720 正方形最合适**。视频按 `object-fit: contain` 适配舞台，非正方形不会被裁剪，但会留白
 - **基础态（idle / studying / working）会循环播放，首尾帧要能自然衔接**
 - **临时态（alert / done / refuse）只播一轮**，播完自动回基础态，同时受 `tempMs` 上限约束
+- **`talking.webm` 是唯一循环的临时态**，格式要求和其他文件一样。它只服务本地大模型，不做这一个、或者模型开关没开，其他六个状态照样用
 
 > 现有这套素材是 720×720 / 24fps / 5 秒。
 
 ### 自己制作一套视频素材（完整流程）
 
-从一段视频到 6 个能用的素材文件，五步。**第三步的抠图脚本是实测过的**——在一张
+从一段视频到 7 个能用的素材文件，五步。**第三步的抠图脚本是实测过的**——在一张
 720×720 合成帧上验过：四角透明、角色主体不透明、**角色内部的纯白块被正确保留**、
 边缘有羽化过渡、背景侧没有残留光晕。
 
@@ -984,7 +1009,7 @@ ffmpeg -framerate 24 -i out/%04d.png -c:v libvpx-vp9 -pix_fmt yuva420p \
 - `-an` —— 丢掉音轨，本来就没人听
 - `-row-mt 1` —— 多线程，纯加速
 
-六个状态各编一次，换掉最后的输出文件名。
+七个状态各编一次，换掉最后的输出文件名。
 
 #### 第五步：验证 alpha 真的进去了
 
@@ -997,7 +1022,7 @@ ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 id
 输出必须是 **`yuva420p`**。如果打印的是 `yuv420p`（末尾少个 `a`），
 说明 alpha 没进去，回去检查 `-auto-alt-ref 0` 和 `-pix_fmt` 那两句。
 
-确认无误后，把 6 个文件丢进 `desktop-pet/videos/` 覆盖同名文件，`Ctrl+F5` 刷新即可。
+确认无误后，把 7 个文件丢进 `desktop-pet/videos/` 覆盖同名文件，`Ctrl+F5` 刷新即可。
 
 #### 基础态和临时态分别注意什么
 
@@ -1067,3 +1092,165 @@ ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 id
 **非正方形的素材会怎样？** 不会被裁剪，按比例缩放到装得下为止，四周留白。想填满舞台就用正方形素材。
 
 **看到的是橙色小猫？** 那是降级动画，原因和排查见[第十二节](#为什么我看到的是一只橙色小猫)。
+
+---
+
+## 十八、本地大模型（Ollama）
+
+前面所有功能都**不联网**——说话靠 `dialog/input.js` 里的中文正则匹配。正则能接住「明天下午两点半上英语课」这种规整说法，接不住「这周找个时间把论文初稿弄完」这种没写明时间的句子，也不会闲聊。
+
+**接一个本地模型就能补上这两块**：你随便怎么说它都能听懂，还能陪你聊天、结合你的日程回答问题。模型跑在你自己电脑上，**对话内容不出局域网**。
+
+> **默认是关的。** 关着的时候不产生任何网络请求，行为和装这个功能之前一模一样。上面所有文档在开关关闭时都成立。
+
+### 三步开起来
+
+**1. 装 Ollama 并拉一个模型**
+
+到 <https://ollama.com/download> 下载安装（Windows / macOS 都有）。装完打开终端：
+
+```bash
+ollama pull qwen3:4b
+```
+
+`qwen3:4b` 约 2.5GB，纯 CPU 也能跑，是默认值。机器有独显、内存 16GB 以上可以换 `qwen3:8b`（约 5GB，答得更稳但更慢）；内存小的老机器用 `qwen3:1.7b`（约 1.4GB，快但容易答歪）。**换模型前必须先 `ollama pull` 把新模型拉到本地，页面只负责填名字连过去，不会替你下载。**
+
+**2. 允许浏览器跨源访问**
+
+用 `file://` 双击打开页面时，浏览器会因为同源策略拦掉对 `127.0.0.1:11434` 的请求。设置一个环境变量再重启 Ollama：
+
+```powershell
+# Windows PowerShell（设完要退出托盘里的 Ollama 再重新打开）
+setx OLLAMA_ORIGINS "*"
+```
+
+```bash
+# macOS / Linux
+export OLLAMA_ORIGINS="*"
+```
+
+`*` 只表示"谁都能连我这个本地端口"，而 Ollama 默认只监听本机，**不会因此把模型暴露到公网**。
+
+> **设完必须真的重启 Ollama（退出托盘图标再打开）**。环境变量只在进程启动那一刻读一次，
+> 正在跑的那个进程不会自己更新——不重启，页面会一直停在「未连接」，看起来像设置没生效。
+>
+> **不想设环境变量也行**：`cd desktop-pet` 后跑 `python -m http.server 8080`，
+> 浏览器开 `http://localhost:8080/`，Ollama 默认就放行 localhost 来源。
+> 但 `file://` 和 `http://localhost:8080` 是**两个独立的存储空间**，原来双击时存的日程
+> 在新地址下看不到。要带过去：双击打开 → 顶部「导出备份」下载一个 JSON → 换 8080 地址打开 → 「导入备份」。
+
+**3. 在页面里打开开关**
+
+顶部工具栏点 **「本地模型：关」**，按钮变绿、文字变成「本地模型：开」：
+
+| 步骤 | 你会看到 |
+| --- | --- |
+| 点「本地模型：关」 | 按钮变绿写「本地模型：开」，底部提示「本地模型已开启，正在检测连接…」，宠物说「本地模型开啦～」 |
+| 探活（`GET /api/tags`，2.5 秒超时） | 徽章显示「检测中…」 |
+| 结果 | 通 →「已连接（N 个模型）」；不通 →「未连接」 |
+
+**模型名要自己填。** 点 **⚙** 展开设置面板：
+
+| 字段 | 怎么填 |
+| --- | --- |
+| 接口地址 | 默认 `http://127.0.0.1:11434`，模型装在本机就不用改。装在局域网另一台机器上填 `http://192.168.x.x:11434` |
+| 模型名 | 手输，默认 `qwen3:4b`。**先 `ollama list` 看一眼有哪些**，名字要一模一样（含 `:4b` 这样的标签） |
+| 「保存」 | 写进浏览器存储，并立刻重新探活 |
+| 「重新检测」 | 不改配置，只重新打一次探活 |
+
+模型名输入框带自动补全：探活成功后，Ollama 返回的模型清单会灌进候选里，点一下就能选，不用手打全名。
+
+> **模型名打错不会报错。** 服务器本身是通的，所以徽章会变成「**已连接，但没有 xxx**」——看到这句就是名字写错了，去 `ollama list` 核对一下。
+
+连不上时徽章显示「未连接」，并且**不影响任何原有功能**——加日程、提醒、导入导出走的还是原来那套正则。
+
+### 打开之后有什么不一样
+
+| 场景 | 关着 | 开着 |
+| --- | --- | --- |
+| 「明天下午三点到四点项目评审会议」 | 正则接住，直接建日程 | 正则先接，同样的结果 |
+| 「**这周找时间**把论文初稿弄完」 | 听不懂，回「没太听懂」 | 模型补全意图，**复述给你确认**，回复「确认」才建日程 |
+| 「我今天还有什么安排」 | 正则接住，列出清单 | 同上（模型不参与） |
+| 「你好呀，今天心情怎么样」 | 听不懂 | 聊天回复，边生成边显示 |
+| 「我明天有什么要做的？」 | 听不懂 | 结合你的日程表回答 |
+
+**三个关键设计**：
+
+- **正则优先，模型兜底**。只有正则没接住的句子才会送给模型。所以常用说法永远是**毫秒级**响应，模型再慢也不拖累它们。
+- **模型不直接写数据**。它只输出一个意图对象，后面照样走 `App.Controller` 里那些 `do*` 处理器——冲突检测、重叠询问、娱乐拦截全都还在。**不会出现"模型把日程写乱了"这种事**。
+- **模型解析出的写操作，先复述再执行**。4B 模型会理解错，而删错、改错一条日程的代价比多问一句大得多，所以添加 / 修改 / 删除 / 复制都会先跟你对一遍，回复「确认」才落库。查询（「今天有什么安排」）和闲聊是只读或纯文字，不拦，直接答。
+
+```
+你：这周找时间把论文初稿弄完
+宠物：我理解你要添加 周五 14:00–15:00「论文初稿」，对吗？（回复「确认」或「取消」）
+你：确认
+宠物：好的，已添加 周五 14:00–15:00 论文初稿（学习）。
+```
+
+> 具体日期时间是**模型补的**，觉得不对不用重新组织语言，直接说对的说法（比如「改成周六上午」）——待确认就撤掉，这句按新指令处理。
+> 关掉模型时同一句话仍是「没太听懂」：确认门只装在模型通路上，正则通路只在自己有把握时才接住，解析出来直接执行。
+
+### 它有多慢？
+
+本地小模型的速度取决于你的硬件。**纯 CPU 推理时实测**（qwen3:4b，643 token 的意图提示词）：
+
+| 阶段 | 耗时 |
+| --- | --- |
+| 读提示词（prompt eval） | 约 9.5 秒 |
+| 生成 48 token 的意图 JSON | 约 3.2 秒 |
+| **一次加日程总计** | **约 13 秒** |
+
+有独显（GPU 加速）会快一个量级，通常在 1~3 秒内。聊天更慢一点，但**是流式输出的**——第一个字大约 3 秒出现，然后边生成边往外蹦，不用干等。
+
+等待期间宠物会切成「交流中」状态循环播放 `talking.webm`，对话框上面显示「让我想想…」，所以不会看起来像卡死了。
+
+**如果超过 30 秒还没出结果**，会判超时：状态降级为「未连接」，这句话退回离线通路处理（你会看到「没太听懂」），而不是石沉大海。
+
+### 出问题了
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 徽章一直「未连接」 | Ollama 没启动 / 地址不对 | 看托盘里有没有 Ollama；命令行跑 `ollama list` 确认能通 |
+| 提示要设 `OLLAMA_ORIGINS` | 浏览器拦了跨源请求 | 见上面第 2 步，**设完必须重启 Ollama** |
+| 之前能用，突然「未连接」 | Ollama 重启后没加载模型，或端口被占 | 点 ⚙ 里的「重新检测」 |
+| 回复里带一堆"首先…让我想想…" | 不是本项目的 bug，是模型在"思考" | 项目已经用 JSON 结构约束压制住了；换成更大的模型（`qwen3:8b`）更稳 |
+| 每次回答都很慢 | 纯 CPU 推理 + 模型太大 | 换 `qwen3:1.7b`，或让 Ollama 用上独显 |
+
+**连不上会不会影响正常用？** 不会。探活失败只是把按钮显示成「未连接」，你照样能加日程、看提醒、导入导出——走的还是原来那套正则。
+
+### 隐私
+
+- 请求只发给**你自己填的地址**，且必须是本机或局域网地址（`localhost` / `127.*` / `10.*` / `192.168.*` / `172.16-31.*`）。填公网地址会被拒绝并回落到默认值——这是防止设置被篡改后把你说的话发到外网。
+- 发给模型的内容有三块：你的那句话、你的日程清单（今天+明天，最多 30 条）、最近 12 轮对话。
+- **对话记录只存在内存里**，刷新页面就没了，不写 LocalStorage，也不落盘。
+- 开关关着的时候，以上全部不发生。
+
+### 想调参 / 想验证
+
+可调项在 `App.Config.llm`（`desktop-pet/app.js`）：
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `healthTimeoutMs` | `2500` | 探活超时 |
+| `intentTimeoutMs` | `30000` | 意图提取超时。纯 CPU 上实测要 13 秒，别调太小 |
+| `chatTimeoutMs` | `90000` | 聊天回复总超时（也是「交流中」动画的兜底上限） |
+| `intentMaxTokens` | `256` | 意图 JSON 的输出上限 |
+| `chatMaxTokens` | `512` | 聊天回复的长度上限 |
+| `historyTurns` | `12` | 记着最近多少轮对话 |
+| `contextTaskDays` | `2` | 提示词里带几天的日程（今天+明天） |
+| `contextMaxTasks` | `30` | 提示词里最多列几条任务 |
+
+想验证接得通不通，在仓库根目录跑：
+
+```bash
+npm test                      # 离线：全部 9 个套件 463 条断言，不联网。test-llm.js 占其中 169 条
+npm run test:live             # 联网：真连 Ollama 跑一遍完整链路（32 条）
+```
+
+`test-llm-live.js` 需要 Ollama 在跑。连不上、或者模型没 pull，它会**打印跳过原因并以退出码 0 结束**，不会让回归挂掉。想指定地址或模型：
+
+```bash
+OLLAMA_ENDPOINT=http://192.168.1.9:11434 OLLAMA_MODEL=qwen3:8b npm run test:live
+```
+
+**改了提示词或换了模型之后，跑一次 live 测试**——离线测试里模型是打桩的，管不到"真模型听不听话"。

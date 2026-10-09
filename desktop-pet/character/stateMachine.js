@@ -242,15 +242,27 @@
       return true;
     },
 
-    /* ---- 临时态队列 ---- */
-    enqueueTemp: function (type, taskId, ms) {
+    /* ---- 临时态队列 ----
+       opts 透传给 Animation.playTemp（目前只有 loop，给大模型「交流中」用） */
+    enqueueTemp: function (type, taskId, ms, opts) {
       var key = type + ':' + (taskId || '');
       var dup = this.queue.some(function (q) { return q.key === key; });
       if (dup && type !== 'refuse') return;
 
       if (this.queue.length >= 3) this.queue.shift();
-      this.queue.push({ type: type, taskId: taskId, ms: ms, key: key });
+      this.queue.push({ type: type, taskId: taskId, ms: ms, key: key, opts: opts || null });
       this.pump();
+    },
+
+    /* 提前结束某个类型正在播的临时态（大模型回复返回时收掉「交流中」）。
+       只认当前正在播的那一个；还在队列里的直接摘掉，避免之后又冒出来 */
+    endTemp: function (type) {
+      if (this.temp && this.temp.type === type) {
+        App.Animation.cancelTemp();   // resolve 后 pump 会自己收尾并回到基础态
+        return true;
+      }
+      this.queue = this.queue.filter(function (q) { return q.type !== type; });
+      return false;
     },
 
     pump: function () {
@@ -260,7 +272,7 @@
       this.temp = item;
 
       App.bus.emit('temp:start', { type: item.type, taskId: item.taskId });
-      App.Animation.playTemp(item.type, item.ms).then(function () {
+      App.Animation.playTemp(item.type, item.ms, item.opts).then(function () {
         App.bus.emit('temp:end', { type: item.type, taskId: item.taskId });
         self.temp = null;
         if (self.queue.length) self.pump();

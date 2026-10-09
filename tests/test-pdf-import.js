@@ -2,15 +2,24 @@
  * 无头测试：验证 schedule/pdfImporter.js 的 PDF → CSV → 日程 回环
  * 覆盖：模板 PDF 能被解析、中文保真、跨天 (+1)、含逗号标题、规则词展开，
  *       以及「走 PDF」与「直接读 CSV」两条路径的解析结果完全一致（重构无损）。
- * 前置：先跑 npm run gen:pdf 生成模板
- * 运行： node _scratch/test-pdf-import.js
+ * 前置：在仓库根目录 npm install；模板已由 npm run gen:pdf 生成
+ * 运行： node tests/test-pdf-import.js
  */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+/* pdfjs-dist 是 dev 依赖，不在仓库里。缺了要给一句人话，而不是 MODULE_NOT_FOUND 堆栈 */
+let pdfjsLib;
+try {
+  pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+} catch (e) {
+  console.log('\n--- 结果：0 通过 / 1 失败 ---\n');
+  console.error('缺少 pdfjs-dist：请先在仓库根目录执行 npm install');
+  process.exit(1);
+}
+
 const ROOT = path.join(__dirname, '..', 'desktop-pet');
 const PDF_PATH = path.join(ROOT, 'data', 'schedule_template.pdf');
 const CSV_PATH = path.join(ROOT, 'data', 'schedule_template.csv');
@@ -51,7 +60,11 @@ function check(name, cond, extra) {
   else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '  -> ' + extra : '')); }
 }
 
-const NOW = Date.now();                       // 模板刚生成，示例日期都在未来
+/* 时钟钉死，别用 Date.now()。模板里那三条单次日程是写死的日期
+   （2026-09-27 / 10-02 / 10-03，见 data/schedule_template.csv），用真实时间跑的话
+   它们迟早会变成「已过去」被跳过，断言就会莫名其妙少 3 条 —— 2026-10-09 就是这么挂的。
+   钉在最早那条之前，结果才可复现。改模板日期时记得同步改这里。 */
+const NOW = new Date('2026-09-20T09:00:00').getTime();
 const today = new Date(NOW);
 const pad2 = n => (n < 10 ? '0' + n : '' + n);
 const dstr = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());

@@ -1,7 +1,7 @@
 /*
  * 预览生成物：用浏览器里的 pdf.js 把模板 PDF 渲染成 PNG，便于目视检查排版
- * 运行： node _scratch/preview-template.js
- * 输出： _scratch/_shot/schedule_template.png（临时产物，可随时删）
+ * 运行： node tools/preview-template.js
+ * 输出： tools/_shot/schedule_template.png（临时产物，可随时删）
  */
 'use strict';
 const fs = require('fs');

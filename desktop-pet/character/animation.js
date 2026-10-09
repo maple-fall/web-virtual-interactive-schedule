@@ -1,13 +1,13 @@
 /*
  * character/animation.js — 角色动画：videos/<state>.webm 优先（VP9 透明通道），
  * 依次回退 .mp4 -> 内置 SVG 小猫
- * 对外：init(stageEl) / preload(forceSvg) / play(baseState) / playTemp(state, ms) -> Promise
+ * 对外：init(stageEl) / preload(forceSvg) / play(baseState) / playTemp(state, ms, opts) -> Promise
  */
 (function () {
   'use strict';
   var App = window.App;
 
-  var STATES = ['idle', 'studying', 'working', 'alert', 'done', 'refuse'];
+  var STATES = ['idle', 'studying', 'working', 'alert', 'done', 'refuse', 'talking'];
   /* 提醒类临时态的视觉别名：applyState 会把未知状态钳回 idle，故映射到已有素材 */
   var TEMP_VISUALS = { warnStart: 'alert', warnEnd: 'done' };
   /* 浏览器实测：HEVC(H.265) 的 mp4 在 Chrome/Edge 无法播放，故 webm(VP9-alpha) 优先 */
@@ -289,9 +289,12 @@
       }
     },
 
-    /* 临时态：返回 Promise，播完一轮或到时（取先），至少展示 1.8s */
-    playTemp: function (state, ms) {
+    /* 临时态：返回 Promise，播完一轮或到时（取先），至少展示 1.8s
+       opts.loop = true 时不理会「播完一轮」，一直循环到到时或被 cancelTemp() 提前结束
+       （大模型「交流中」用：回复要几秒就说几秒，时长由调用方控制） */
+    playTemp: function (state, ms, opts) {
       var self = this;
+      var loop = !!(opts && opts.loop);
       var visual = TEMP_VISUALS[state] || state;   // 提醒态复用已有素材
       this.clearTempTimer();
       this.applyState(visual);
@@ -314,14 +317,15 @@
 
         if (self.mode === 'video') {
           var src = self._srcFor(visual);
-          self.video.loop = false;
+          self.video.loop = loop;
           if (self.video.getAttribute('src') !== src) self._setSrc(src);
           else {
             try { self.video.currentTime = 0; } catch (e) {}
             var p = self.video.play();
             if (p && p.catch) p.catch(function () {});
           }
-          self.video.addEventListener('ended', finish, { once: true });
+          // 循环播放时 ended 不会触发（浏览器自己回到开头），不必挂监听
+          if (!loop) self.video.addEventListener('ended', finish, { once: true });
         }
         self._tempTimer = setTimeout(finish, wait);
       });

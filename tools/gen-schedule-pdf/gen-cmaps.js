@@ -10,7 +10,7 @@
  * 只打包 GB 系（简体中文）：GB/GBK/GBT/EUC/UniGB/Adobe-GB1 共 33 个文件，base64 后约 390KB。
  * 繁体（CNS）、日文（JIS）、韩文（KOR）系没有打包 —— 用到了会报「缺少内置 CMap」。
  *
- * 用法：在 _scratch 目录执行 npm run gen:cmaps
+ * 用法：在仓库根目录执行 npm run gen:cmaps
  */
 'use strict';
 
@@ -18,7 +18,7 @@ var fs = require('fs');
 var path = require('path');
 
 var ROOT = path.resolve(__dirname, '..', '..');
-var SRC_DIR = path.join(ROOT, '_scratch', 'node_modules', 'pdfjs-dist', 'cmaps');
+var SRC_DIR = path.join(ROOT, 'node_modules', 'pdfjs-dist', 'cmaps');
 var OUT = path.join(ROOT, 'desktop-pet', 'lib', 'pdfjs', 'cmaps.js');
 
 // 简体中文相关：GB2312/GBK/GB18030 编码族 + Adobe-GB1 字符集 + UTF 映射变体
@@ -27,7 +27,7 @@ var WANTED = /^(GB|GBT|GBK|UniGB|Adobe-GB1)/;
 function main() {
   if (!fs.existsSync(SRC_DIR)) {
     console.error('未找到 CMap 源目录：' + SRC_DIR);
-    console.error('请先在 _scratch 目录执行 npm install');
+    console.error('请先在仓库根目录执行 npm install');
     process.exit(1);
   }
 
@@ -51,8 +51,8 @@ function main() {
   var js = [
     '/*',
     ' * lib/pdfjs/cmaps.js — 内置 CJK CMap 表（生成产物，勿手改）',
-    ' * 生成器：_scratch/gen-schedule-pdf/gen-cmaps.js（npm run gen:cmaps）',
-    ' * 源：pdfjs-dist ' + require(path.join(ROOT, '_scratch', 'node_modules', 'pdfjs-dist', 'package.json')).version +
+    ' * 生成器：tools/gen-schedule-pdf/gen-cmaps.js（npm run gen:cmaps）',
+    ' * 源：pdfjs-dist ' + require(path.join(ROOT, 'node_modules', 'pdfjs-dist', 'package.json')).version +
       ' 的 cmaps/ 目录，筛出 GB 系 ' + names.length + ' 个文件',
     ' *',
     ' * 为什么需要：用标准 CJK 字体（STSong-Light 等）且未内嵌字体的 PDF，字形到 Unicode 的映射',

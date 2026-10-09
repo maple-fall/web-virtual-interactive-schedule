@@ -1,6 +1,6 @@
 /*
  * 无头测试：验证 settings.js 的界面壁纸逻辑
- * 运行： node _scratch/test-wallpaper.js
+ * 运行： node tests/test-wallpaper.js
  */
 'use strict';
 const fs = require('fs');
@@ -143,6 +143,15 @@ function check(name, cond, extra) {
   else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '  -> ' + extra : '')); }
 }
 
+/* 存储里除 bg / wallpaper 外还带 llm 配置（后加的字段），
+   断言只比对测试关心的键，避免每加一个设置就改一遍期望值 */
+function storedOk(expect) {
+  let got;
+  try { got = JSON.parse(store[KEY]); } catch (e) { return false; }
+  return got !== null && typeof got === 'object' &&
+    Object.keys(expect).every(k => got[k] === expect[k]);
+}
+
 const S = App.Settings;
 const PRESET = 'data/backgrounds/bg1.jpg';
 const WALL = 'data/wallpapers/wall1.jpg';
@@ -204,7 +213,7 @@ check('cover / center / no-repeat / fixed',
   body.style.backgroundRepeat === 'no-repeat' && body.style.backgroundAttachment === 'fixed',
   [body.style.backgroundSize, body.style.backgroundPosition, body.style.backgroundRepeat, body.style.backgroundAttachment].join(' | '));
 check('写入 settingsKey（含 wallpaper）',
-  store[KEY] === JSON.stringify({ bg: null, wallpaper: WALL }), store[KEY]);
+  storedOk({ bg: null, wallpaper: WALL }), store[KEY]);
 check('清除按钮显示', els['btn-wallpaper-clear'].hidden === false);
 check('选中项高亮落在该预设', selectedThumbs().length === 1 && selectedThumbs()[0].dataset.path === WALL,
   String(selectedThumbs().length));
@@ -223,17 +232,17 @@ check('选中项恢复', selectedThumbs().length === 1 && selectedThumbs()[0].da
 console.log('\n=== 用例 4：与舞台背景互不覆盖 ===');
 S.select(PRESET);
 check('选舞台背景不动 wallpaper',
-  store[KEY] === JSON.stringify({ bg: PRESET, wallpaper: WALL }), store[KEY]);
+  storedOk({ bg: PRESET, wallpaper: WALL }), store[KEY]);
 S.selectWallpaper(PRESET);
 // 舞台背景图不在壁纸白名单里，设置应被弹回，且不影响已有的 bg
 check('把舞台背景图当壁纸设置 → 拒绝',
-  store[KEY] === JSON.stringify({ bg: PRESET, wallpaper: WALL }), store[KEY]);
+  storedOk({ bg: PRESET, wallpaper: WALL }), store[KEY]);
 S.clearBg();
 check('清舞台背景后壁纸还在',
-  store[KEY] === JSON.stringify({ bg: null, wallpaper: WALL }), store[KEY]);
+  storedOk({ bg: null, wallpaper: WALL }), store[KEY]);
 check('壁纸仍在 body 上', body.classList.contains('has-wallpaper'));
 S.clearWallpaper();
-check('清壁纸后写入 null', store[KEY] === JSON.stringify({ bg: null, wallpaper: null }), store[KEY]);
+check('清壁纸后写入 null', storedOk({ bg: null, wallpaper: null }), store[KEY]);
 
 console.log('\n=== 用例 5：清除壁纸 ===');
 check('class 移除', !body.classList.contains('has-wallpaper'));
@@ -249,7 +258,7 @@ check('高亮落在「无」选项上', sel5.length === 1 && sel5[0].dataset.pat
 console.log('\n=== 用例 6：非法值被拒绝 ===');
 msgs.length = 0;
 S.selectWallpaper('data/wallpapers/../../evil.jpg');
-check('非白名单路径未写入', store[KEY] === JSON.stringify({ bg: null, wallpaper: null }), store[KEY]);
+check('非白名单路径未写入', storedOk({ bg: null, wallpaper: null }), store[KEY]);
 check('未给出误导性反馈', msgs.length === 0, JSON.stringify(msgs));
 
 console.log('\n=== 用例 7：损坏 / 不可信存储兜底 ===');
@@ -281,7 +290,7 @@ check('导出为 JPEG q0.8', c._toDataURL.length === 1 &&
   c._toDataURL[0][0] === 'image/jpeg' && c._toDataURL[0][1] === 0.8,
   JSON.stringify(c._toDataURL));
 check('data URL 写入设置',
-  store[KEY] === JSON.stringify({ bg: null, wallpaper: 'data:image/jpeg;base64,AAAA' }), store[KEY]);
+  storedOk({ bg: null, wallpaper: 'data:image/jpeg;base64,AAAA' }), store[KEY]);
 check('body 立即生效', body.classList.contains('has-wallpaper') &&
   body.style.backgroundImage.indexOf('url("data:image/jpeg') > 0);
 check('面板出现自定义缩略图并选中',

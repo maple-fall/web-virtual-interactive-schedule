@@ -2,7 +2,7 @@
  * 浏览器端到端测试：真实 Edge 打开 file:// 页面，走完整「选文件 → 解析 → 确认导入」链路
  * 覆盖无头测试覆盖不到的部分：vendored pdf.min.js 能否在 file:// 下加载、
  * worker 创建失败后能否自动回退、FileReader.readAsArrayBuffer → importPDF 接线。
- * 运行： node _scratch/e2e-pdf-import.js
+ * 运行： node tests/e2e-pdf-import.js
  */
 'use strict';
 const fs = require('fs');
@@ -276,7 +276,11 @@ function pageScript(pdfB64, csvText, foreignB64, timetableB64) {
     '--user-data-dir=' + PROFILE,
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     '--disable-features=Translate',
-    fileUrl(INDEX)
+    /* 冻结时钟到模板基准日（早于模板里那三条写死的单次日程）。
+       不冻的话它们会随真实时间变成「已过去」被跳过，导入条数每天少一点，
+       「62 条」这类断言就会在某天突然变红——2026-10-09 就是这么挂的。 */
+    /* 注意 Clock.init 只认带 time 的 date，光给 date 不生效（见 app.js:223） */
+    fileUrl(INDEX) + '?time=09:00&date=2026-09-20&freeze=1'
   ], { stdio: 'ignore' });
 
   const cleanup = () => {

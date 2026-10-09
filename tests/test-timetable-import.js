@@ -4,14 +4,24 @@
  *       STSong-Light 标准字体、无内嵌 ToUnicode，必须靠内置 CMap 才提得出文字）
  * 覆盖：CMap 提取、跨页续接、单双周、折行标题、场地写进 title、节次→时间映射、
  *       学期起始日推断、过去课程过滤，以及「模板 PDF 不走课表分支」的回归。
- * 运行： node _scratch/test-timetable-import.js
+ * 前置：在仓库根目录 npm install
+ * 运行： node tests/test-timetable-import.js
  */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+/* pdfjs-dist 是 dev 依赖，不在仓库里。缺了要给一句人话，而不是 MODULE_NOT_FOUND 堆栈 */
+let pdfjsLib;
+try {
+  pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+} catch (e) {
+  console.log('\n--- 结果：0 通过 / 1 失败 ---\n');
+  console.error('缺少 pdfjs-dist：请先在仓库根目录执行 npm install');
+  process.exit(1);
+}
+
 const ROOT = path.join(__dirname, '..', 'desktop-pet');
 const TT_PDF = path.join(ROOT, 'data', '梁浩贤(2026-2027-1)课表.pdf');
 const TPL_PDF = path.join(ROOT, 'data', 'schedule_template.pdf');
@@ -54,6 +64,7 @@ function check(name, cond, extra) {
 
 const TERM = '2026-08-31';                 // 该课表第 1 周周一（按打印日期 2026-09-19 推断）
 const NOW_BEFORE = new Date(2026, 7, 30).getTime();   // 开学前一天：无过去过滤
+const TPL_NOW = new Date('2026-09-20T09:00:00').getTime();  // 模板基准日：早于模板里所有写死的日期
 const TOTAL = 275;                         // 全部课程展开后的节次数（手算核对）
 
 function asArrayBuffer(file) {
@@ -73,7 +84,10 @@ const hasSample = fs.existsSync(TT_PDF);
 
 async function templateGroups() {
   console.log('\n=== 7. 回归：模板 PDF 不走课表分支 ===');
-  const tpl = await App.PdfImporter.import(asArrayBuffer(TPL_PDF), Date.now());
+  /* 时钟钉死：模板里那三条单次日程是写死的日期，用 Date.now() 跑的话
+     它们迟早变成「已过去」被跳过，条数断言就会莫名其妙变少。
+     和 test-pdf-import.js 用同一个基准日，两个测试的期望值才对得上。 */
+  const tpl = await App.PdfImporter.import(asArrayBuffer(TPL_PDF), TPL_NOW);
   check('模板仍然按五列表格解析', tpl.fatal === null && !tpl.timetable, tpl.fatal || 'timetable=' + !!tpl.timetable);
   check('模板解析出 62 条', tpl.rows.length === 62, tpl.rows.length);
 

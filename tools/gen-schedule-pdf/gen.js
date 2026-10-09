@@ -4,7 +4,7 @@
  * 「下载模板」按钮下载的就是它。CSV 一并写出，作为格式参考与回归测试样本。
  * 两份输出共用同一份行数据，保证内容一致（回环测试依赖这一点）。
  *
- * 用法：在 _scratch 目录执行 npm run gen:pdf
+ * 用法：在仓库根目录执行 npm run gen:pdf
  */
 'use strict';
 
@@ -228,7 +228,7 @@ function writeJS() {
     ' *',
     ' * 【本文件由 gen-schedule-pdf/gen.js 生成，请勿手改】',
     ' * 与 data/schedule_template.pdf、data/schedule_template.csv 同一次生成写出，',
-    ' * 三者内容必须一致；改动模板请重新生成：cd _scratch && npm run gen:pdf',
+    ' * 三者内容必须一致；改动模板请重新生成：npm run gen:pdf（在仓库根目录执行）',
     ' *',
     ' * 内联成 base64 的原因见 gen.js 里 writeJS() 的注释：file:// 下 <a download> 指向',
     ' * 本地文件会因跨源而失效，只能把字节读进内存用 Blob 触发下载；而 file:// 下',

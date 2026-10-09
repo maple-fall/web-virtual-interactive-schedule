@@ -1,6 +1,6 @@
 /*
  * lib/pdfjs/cmaps.js — 内置 CJK CMap 表（生成产物，勿手改）
- * 生成器：_scratch/gen-schedule-pdf/gen-cmaps.js（npm run gen:cmaps）
+ * 生成器：tools/gen-schedule-pdf/gen-cmaps.js（npm run gen:cmaps）
  * 源：pdfjs-dist 3.11.174 的 cmaps/ 目录，筛出 GB 系 33 个文件
  *
  * 为什么需要：用标准 CJK 字体（STSong-Light 等）且未内嵌字体的 PDF，字形到 Unicode 的映射

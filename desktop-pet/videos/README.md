@@ -21,6 +21,7 @@
 | `alert.webm` | 提醒 | 任务开始播报（临时态） | 举手挥动 + 感叹号 |
 | `done.webm` | 完成 | 任务结束播报（临时态） | 闭眼笑 + 飘心 |
 | `refuse.webm` | 拒绝 | 任务时段内提出娱乐请求 | 惊讶张嘴 + 双手抬起，配合 CSS 抖动与红色氛围 |
+| `talking.webm` | 交流中 | 本地模型正在组织回复（临时态） | 说话/讲解手势，循环播放到回复结束 |
 
 ## 素材要求
 
@@ -33,6 +34,8 @@
 - 基础态（idle / studying / working）会被循环播放，首尾帧需能自然衔接
 - 临时态（alert / done / refuse）播完一轮即结束，同时受 `App.Config.tempMs` 上限约束
   （alert 5s / done 3.5s / refuse 2.5s，可在 `app.js` 的 Config 里调整）
+- `talking.webm` 是唯一的**循环**临时态：本地模型回复要几秒就循环几秒，由回复返回时
+  主动收尾，`tempMs.talking`（90s）只是兜底上限，所以首尾帧要能自然衔接
 
 ## 制作素材
 

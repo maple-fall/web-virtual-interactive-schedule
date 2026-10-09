@@ -42,6 +42,66 @@
       return div;
     },
 
+    /* 流式回复：先占位再逐段填充，返回句柄 { append, end, error, text }
+         opts.mood   —— 与 pet() 同义
+         opts.render —— fn(原文) -> html，转义责任在调用方（llm.js 传 mdToHtml）
+       逐字重排会抖，所以攒够 24 字或隔 80ms 才重绘一次；end 时做一次干净收尾 */
+    stream: function (opts) {
+      opts = opts || {};
+      var self = this;
+      var render = opts.render || function (t) { return App.util.escapeHtml(t); };
+      var div = this._push('msg-pet', '');
+      if (div) {
+        div.setAttribute('data-mood', opts.mood || 'idle');
+        div.classList.add('streaming');
+      }
+
+      var text = '', shownLen = -1, lastAt = 0, timer = null, closed = false;
+
+      function scroll() {
+        if (self.el) self.el.scrollTop = self.el.scrollHeight;
+      }
+      function paint(force) {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (!div || (closed && !force)) return;
+        div.innerHTML = render(text);
+        shownLen = text.length;
+        lastAt = Date.now();
+        scroll();
+      }
+
+      return {
+        append: function (chunk) {
+          if (closed || !chunk) return;
+          text += String(chunk);
+          if (text.length - shownLen >= 24 || Date.now() - lastAt >= 80) {
+            paint();
+            return;
+          }
+          if (!timer) {
+            timer = setTimeout(function () { timer = null; paint(); }, 90);
+          }
+        },
+        end: function (finalText) {
+          if (closed) return;
+          if (finalText != null) text = String(finalText);
+          closed = true;
+          paint(true);
+          if (div) div.classList.remove('streaming');
+        },
+        error: function (html) {
+          if (closed) return;
+          closed = true;
+          if (timer) { clearTimeout(timer); timer = null; }
+          if (!div) return;
+          div.className = 'msg msg-error';   // 去掉 streaming，光标随之消失
+          div.innerHTML = html;
+          scroll();
+        },
+        text: function () { return text; }
+      };
+    },
+
     system: function (text) {
       return this._push('msg-system', App.util.escapeHtml(text));
     },

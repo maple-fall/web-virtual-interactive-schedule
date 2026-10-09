@@ -3,7 +3,7 @@
  *
  * 【本文件由 gen-schedule-pdf/gen.js 生成，请勿手改】
  * 与 data/schedule_template.pdf、data/schedule_template.csv 同一次生成写出，
- * 三者内容必须一致；改动模板请重新生成：cd _scratch && npm run gen:pdf
+ * 三者内容必须一致；改动模板请重新生成：npm run gen:pdf（在仓库根目录执行）
  *
  * 内联成 base64 的原因见 gen.js 里 writeJS() 的注释：file:// 下 <a download> 指向
  * 本地文件会因跨源而失效，只能把字节读进内存用 Blob 触发下载；而 file:// 下

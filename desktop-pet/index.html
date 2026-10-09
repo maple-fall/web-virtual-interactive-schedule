@@ -21,12 +21,37 @@
       <button id="btn-bg-clear" class="btn btn-ghost" hidden>清除背景</button>
       <button id="btn-wallpaper" class="btn btn-ghost">界面壁纸</button>
       <button id="btn-wallpaper-clear" class="btn btn-ghost" hidden>清除壁纸</button>
+      <button type="button" id="btn-llm" class="btn btn-ghost" aria-pressed="false">本地模型：关</button>
+      <button type="button" id="btn-llm-config" class="btn btn-ghost" title="本地模型设置">⚙</button>
       <input type="file" id="file-csv" accept=".csv,.pdf,text/csv,application/pdf" hidden>
       <input type="file" id="file-backup" accept=".json,application/json" hidden>
       <input type="file" id="file-wallpaper" accept="image/*" hidden>
     </div>
     <div id="bg-picker" class="bg-picker" hidden></div>
     <div id="wallpaper-picker" class="bg-picker" hidden></div>
+    <!-- 本地模型设置：地址限本机/局域网；开关关闭时应用不产生任何网络请求 -->
+    <div id="llm-picker" class="bg-picker llm-panel" hidden>
+      <span class="bg-picker-tip">本地模型（Ollama）：</span>
+      <label class="llm-field">接口地址
+        <input type="text" id="llm-endpoint" class="llm-input" spellcheck="false"
+               placeholder="http://127.0.0.1:11434">
+      </label>
+      <label class="llm-field">模型名
+        <input type="text" id="llm-model" class="llm-input" list="llm-models" spellcheck="false"
+               placeholder="qwen3:4b">
+        <datalist id="llm-models"></datalist>
+      </label>
+      <span class="llm-actions">
+        <button type="button" id="llm-save" class="btn btn-primary">保存</button>
+        <button type="button" id="llm-recheck" class="btn btn-ghost">重新检测</button>
+        <span id="llm-status" class="llm-status llm-status-off">已关闭</span>
+      </span>
+      <span class="llm-note">
+        只连本机或局域网地址。用 file:// 直接打开时，需先设置环境变量
+        <code>OLLAMA_ORIGINS=*</code> 再重启 Ollama，否则浏览器会拦下请求；
+        模型要先 <code>ollama pull</code>。开关关闭时应用完全离线，行为与以前一致。
+      </span>
+    </div>
   </header>
 
   <main class="main-grid">
@@ -78,5 +103,6 @@
 <script src="dialog/output.js"></script>
 <script src="dialog/bubble.js"></script>
 <script src="dialog/input.js"></script>
+<script src="dialog/llm.js"></script>
 </body>
 </html>

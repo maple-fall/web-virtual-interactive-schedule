@@ -13,12 +13,13 @@ credentials.json
 .aws/
 .ssh/
 
-# 测试临时产物：e2e 脚本跑一次就会重建这些 Edge 用户目录（约 40MB）
-_scratch/_edge_*/
-_scratch/_shot/
+# 测试临时产物：e2e / 预览脚本跑一次就会重建（Edge 用户目录约 40MB）
+tests/_edge_*/
+tests/_shot/
+tools/_shot/
 
-# _scratch 下的 dev-only 依赖（模板 PDF 生成、回环测试用），应用本体零依赖
-_scratch/node_modules/
+# dev-only 依赖（模板 PDF 生成、导入回环测试用）；desktop-pet/ 本体零依赖，跑它不需要 npm install
+/node_modules/
 
 # 系统杂项
 Thumbs.db

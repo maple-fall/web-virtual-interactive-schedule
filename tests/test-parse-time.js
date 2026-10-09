@@ -1,7 +1,7 @@
 /*
  * 无头测试：验证 dialog/input.js 的自然语言时间解析
  * 重点覆盖「起点 到 终点」区间，尤其是终点省略时段前缀的情况
- * 运行： node _scratch/test-parse-time.js
+ * 运行： node tests/test-parse-time.js
  */
 'use strict';
 const fs = require('fs');
