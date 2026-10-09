@@ -68,6 +68,8 @@ sandbox.window.App.Output = {
       append: c => { h.text += String(c); },
       end: t => { h.closed = true; if (t != null) h.text = String(t); },
       error: e => { h.errored = true; h.errorHtml = String(e); },
+      /* 复读守卫重问前会清屏重来（对应 output.js 的真实 reset） */
+      reset: () => { h.text = ''; h.closed = false; h.resetCount = (h.resetCount || 0) + 1; },
       text: () => h.text
     };
   }
@@ -294,6 +296,42 @@ console.log('\n=== 7. healthCheck：探活永不 throw ===');
   h = await LLM.recheck();
   eq('网络异常 -> 未连接', LLM.status, 'unreachable');
 
+  /* 端点通了但模型没装：必须判成独立状态，否则每条消息都白发给一个不存在的模型、
+     每条都收 404，用户等半天只等到一句「没太听懂」 */
+  reset();
+  net.script.push(stubRes(200, { models: [{ name: 'qwen3:1.7b' }] }));
+  h = await LLM.recheck();
+  eq('端点通但没这个模型 -> missing', LLM.status, 'missing');
+  eq('missing 时探活本身仍算成功', h.ok, true);
+  eq('missing 时留着模型列表（面板要用来提示已装了哪些）', LLM.models.join(','), 'qwen3:1.7b');
+  eq('missing 时不接管消息', LLM.canRoute(), false);
+  eq('missing 时 isUsable 为假', LLM.isUsable(), false);
+  eq('missing 时 ensureReady 为假（走离线文案）', await LLM.ensureReady(), false);
+  eq('missing 时提示说清是没装模型、并给出可照做的命令',
+    /还没安装/.test(LLM.hintText()) && /ollama pull/.test(LLM.hintText()) && /qwen3:4b/.test(LLM.hintText()), true);
+
+  /* 一个模型都没装 */
+  reset();
+  net.script.push(stubRes(200, { models: [] }));
+  await LLM.recheck();
+  eq('一个模型都没装也算 missing', LLM.status, 'missing');
+
+  /* 模型名改了要能自己恢复：missing 不是死状态 */
+  reset();
+  net.script.push(stubRes(200, { models: [{ name: 'qwen3:4b' }] }));
+  h = await LLM.applyConfig({ enabled: true, model: 'qwen3:4b' });
+  eq('换回已装的模型名 -> 恢复 ok', LLM.status, 'ok');
+  eq('恢复后能接管消息', LLM.canRoute(), true);
+
+  /* 非 Ollama 的兼容端点：有 /api/chat 没有 /api/tags，读到 404 不能当成连不上 */
+  reset();
+  net.script.push(stubRes(404, {}));
+  h = await LLM.recheck();
+  eq('tags 404 -> 仍算连上', LLM.status, 'ok');
+  eq('tags 404 时探活成功', h.ok, true);
+  eq('tags 404 时列表为空但不报错', LLM.models.length, 0);
+  eq('tags 404 时读不到列表就跳过模型检查', LLM.canRoute(), true);
+
   console.log('\n=== 8. 开关关闭 = 零网络请求，且沿用原文案 ===');
   reset();
   LLM.applyConfig({ enabled: false });
@@ -407,11 +445,83 @@ console.log('\n=== 7. healthCheck：探活永不 throw ===');
   eq('流式文本拼装正确', s && s.text, '今天还有一节背单词哦');
   eq('流式句柄正常收尾', s && s.closed, true);
   eq('聊天历史一轮一记（含第 9 节那轮）', LLM.Chat.history.length, 4);
-  eq('历史里存的是纯文本，不是 JSON 原文',
-    LLM.Chat.history[LLM.Chat.history.length - 1].content, '今天还有一节背单词哦');
+  /* 历史里 assistant 轮次必须是 JSON 形式，与 REPLY_SCHEMA 对齐。
+     存纯文本会让 qwen3:4b 复读上一条（实测 33%），见开发记录第十四篇 */
+  const lastAsst = LLM.Chat.history[LLM.Chat.history.length - 1].content;
+  eq('历史里 assistant 轮次是 JSON 对象而非纯文本', /^\s*\{/.test(lastAsst), true);
+  eq('JSON 能解回原话（schema 形式与 REPLY_SCHEMA 一致）',
+    (function () { try { return JSON.parse(lastAsst).reply; } catch (e) { return '坏 JSON：' + lastAsst; } })(),
+    '今天还有一节背单词哦');
   eq('聊天系统提示带上了日程上下文', /接下来两天的安排/.test(LLM.chatSystem()), true);
   eq('聊天走的是 schema 约束（format 字段在）',
     JSON.parse(net.calls[net.calls.length - 1].body).format.required[0], 'reply');
+
+  console.log('\n=== 10b. 复读守卫：照抄上一条时丢掉历史重问一次 ===');
+  /* 小模型带多轮历史时会逐字照抄上一条 assistant：走真实路径连问 6 个互不相关的
+     问题是 80%，三变体对照里保留历史 13%、历史折进系统提示仍 13%，
+     只有不带历史的形态是 0%。见开发记录第十六篇 */
+  reset();
+  net.script.push(stubRes(200, { models: [{ name: 'qwen3:4b' }] }));
+  await LLM.recheck();                    // 用 recheck 保证这根桩一定被消费掉（applyConfig 无变化时会跳过探活）
+  LLM.Chat.clear();
+
+  /* 先垫一轮，让守卫有比对基准 */
+  const SAY_HELLO = '{"message":{"content":"{\\"reply\\":\\"你好呀，我是小助手。\\"}"}}';
+  net.script.push(stubStream([SAY_HELLO, '{"done":true}']));
+  await LLM.Chat.send('你好');
+  eq('第一轮正常上屏', log.stream[0] && log.stream[0].text, '你好呀，我是小助手。');
+
+  /* 照抄 -> 应触发重问 */
+  log.stream.length = 0;
+  let n = net.calls.length;
+  net.script.push(stubStream([SAY_HELLO, '{"done":true}']));                     // 第一次：逐字照抄
+  net.script.push(stubStream([
+    '{"message":{"content":"{\\"reply\\":\\"今天是周五，晚上八点半。\\"}"}}', '{"done":true}'
+  ]));                                                                          // 重问：正常答
+  await LLM.Chat.send('现在几点了');
+  eq('照抄被拦下，上屏的是重问后的新回复', log.stream[0] && log.stream[0].text, '今天是周五，晚上八点半。');
+  eq('重问前清过一次屏', log.stream[0] && log.stream[0].resetCount, 1);
+  const retryBody = JSON.parse(net.calls[net.calls.length - 1].body);
+  eq('重问请求不带历史（只有 system + user）', retryBody.messages.length, 2);
+  eq('重问请求最后一条是用户原话', retryBody.messages[1].content, '现在几点了');
+  eq('重问仍走同一套 schema 约束', retryBody.format.required[0], 'reply');
+  eq('重问确实多打了一次请求', net.calls.length - n, 2);
+  let hist = LLM.Chat.history;
+  eq('历史记的是重问后的回答（不是照抄的那句）',
+    JSON.parse(hist[hist.length - 1].content).reply, '今天是周五，晚上八点半。');
+
+  /* 重问还是照抄 -> 认输，给提示而不是把照抄内容留在屏幕上 */
+  log.stream.length = 0;
+  const beforeGiveUp = LLM.Chat.history.length;
+  const SAY_TIME = '{"message":{"content":"{\\"reply\\":\\"今天是周五，晚上八点半。\\"}"}}';
+  net.script.push(stubStream([SAY_TIME, '{"done":true}']));
+  net.script.push(stubStream([SAY_TIME, '{"done":true}']));
+  await LLM.Chat.send('你喜欢什么颜色');
+  eq('重问仍照抄 -> 给友好提示', log.stream[0] && log.stream[0].text, '这个问题我暂时答不上来～换个问法试试？');
+  eq('答不上来时不走红色错误样式', log.stream[0] && log.stream[0].errored, false);
+  eq('答不上来时这一轮不写历史', LLM.Chat.history.length, beforeGiveUp);
+
+  /* 模型一个字都没吐 */
+  log.stream.length = 0;
+  const beforeEmpty = LLM.Chat.history.length;
+  net.script.push(stubStream(['{"done":true}']));
+  await LLM.Chat.send('随便说点什么');
+  eq('模型没吐内容也给友好提示', log.stream[0] && log.stream[0].text, '这个问题我暂时答不上来～换个问法试试？');
+  eq('空回复不写历史', LLM.Chat.history.length, beforeEmpty);
+
+  /* 用户真又问了一遍同一句：模型答同一句是对的，别误伤 */
+  reset();
+  net.script.push(stubRes(200, { models: [{ name: 'qwen3:4b' }] }));
+  await LLM.recheck();
+  LLM.Chat.clear();
+  const SAY_OK = '{"message":{"content":"{\\"reply\\":\\"好的。\\"}"}}';
+  net.script.push(stubStream([SAY_OK, '{"done":true}']));
+  await LLM.Chat.send('你好');
+  log.stream.length = 0;
+  net.script.push(stubStream([SAY_OK, '{"done":true}']));
+  await LLM.Chat.send('你好');
+  eq('用户重复问同一句时，同样的回答不算复读', log.stream[0] && log.stream[0].text, '好的。');
+  eq('这种正常重复不触发重问', log.stream[0] && (log.stream[0].resetCount || 0), 0);
 
   console.log('\n=== 11. 兜底：模型输出坏 JSON 时重试一次 ===');
   reset();
@@ -436,10 +546,12 @@ console.log('\n=== 7. healthCheck：探活永不 throw ===');
   eq('失败时一条日程都不写', App.Manager.all().length, before12);
   eq('状态降级为未连接', LLM.status, 'unreachable');
   eq('给了一条系统提示', log.system.length, 1);
-  /* 用户等了十几秒，不能什么交代都没有：原话退回离线兜底话术 */
-  eq('退回落离线兜底话术', log.pet.some(p => /没太听懂/.test(p.html)), true);
-  check('兜底也给了气泡（先「让我想想」后「没太听懂」）',
-    log.bubble.length === 2 && /没太听懂/.test(log.bubble[1]), log.bubble.join(' → '));
+  /* 用户等了十几秒，不能什么交代都没有：原话退回离线兜底话术。
+     但要说是「模型用不了」，不能说「没太听懂」—— 问题不在用户措辞 */
+  eq('退回落离线兜底话术', log.pet.some(p => /答不上来/.test(p.html)), true);
+  eq('不把责任推给用户措辞', log.pet.every(p => !/没太听懂/.test(p.html)), true);
+  check('兜底也给了气泡（先「让我想想」后「答不上来」）',
+    log.bubble.length === 2 && /答不上来/.test(log.bubble[1]), log.bubble.join(' → '));
   eq('等待动画被收掉', log.temp.some(t => t.end === 'talking'), true);
 
   reset();
@@ -449,6 +561,52 @@ console.log('\n=== 7. healthCheck：探活永不 throw ===');
   LLM.tryRoute('再来一次');
   await LLM.whenIdle();
   eq('未连接时不接管（回到原文案）', net.calls.length, 0);
+
+  /* 开关整个关着时没有模型可怪，「没太听懂」才是对的：用户确实没说出能识别的日程话术 */
+  reset();
+  LLM.applyConfig({ enabled: false });
+  App.Controller.replyUnparsed(App.Input.parse('随便聊两句', { now: App.Clock.now() }));
+  eq('开关关着时仍用原文案', log.pet.some(p => /没太听懂/.test(p.html)), true);
+
+  console.log('\n=== 12b. 设置面板：徽章与提示文案 ===');
+  /* document 桩平时 getElementById 一律返回 null，renderLlmStatus 直接早退。
+     这里临时塞几个记账元素，专门验文案与显示/隐藏 */
+  (function () {
+    const els = {};
+    const mk = () => ({ textContent: '', className: '', hidden: false, innerHTML: '', kids: [],
+                        appendChild(c) { this.kids.push(c); } });
+    ['llm-status', 'llm-status-tip', 'llm-models'].forEach(id => { els[id] = mk(); });
+    const orig = sandbox.document.getElementById;
+    sandbox.document.getElementById = id => els[id] || null;
+    try {
+      const R = App.Settings.renderLlmStatus;
+
+      R('missing', 1, ['qwen3:4b'], 'llama3:70b');
+      eq('missing 徽章点名缺哪个模型', els['llm-status'].textContent, '已连接，但没有 llama3:70b');
+      eq('missing 徽章是告警色', /llm-status-bad/.test(els['llm-status'].className), true);
+      eq('missing 提示给了 pull 命令', /ollama pull llama3:70b/.test(els['llm-status-tip'].textContent), true);
+      eq('missing 提示列出已装的模型', /qwen3:4b/.test(els['llm-status-tip'].textContent), true);
+      eq('missing 时提示可见', els['llm-status-tip'].hidden, false);
+
+      R('unreachable', 0, [], 'qwen3:4b');
+      eq('unreachable 徽章', els['llm-status'].textContent, '未连接');
+      eq('unreachable 提示指了「重新检测」', /重新检测/.test(els['llm-status-tip'].textContent), true);
+      eq('unreachable 提示可见', els['llm-status-tip'].hidden, false);
+
+      R('ok', 2, ['qwen3:4b', 'qwen3:1.7b'], 'qwen3:4b');
+      eq('ok 徽章报数量', els['llm-status'].textContent, '已连接（2 个模型）');
+      eq('ok 时提示收起', els['llm-status-tip'].hidden, true);
+
+      R('ok', null, [], 'qwen3:4b');
+      eq('读不到模型列表时不谎报 0 个', els['llm-status'].textContent, '已连接（读不到模型列表）');
+
+      R('off', 0, [], 'qwen3:4b');
+      eq('关闭时徽章', els['llm-status'].textContent, '已关闭');
+      eq('关闭时提示收起', els['llm-status-tip'].hidden, true);
+    } finally {
+      sandbox.document.getElementById = orig;
+    }
+  })();
 
   console.log('\n=== 13. relaxLocator：丢掉模型编出来的定位时间 ===');
   App.Manager.tasks = [

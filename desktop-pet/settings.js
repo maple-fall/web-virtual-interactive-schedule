@@ -206,13 +206,17 @@
     renderLlmStatus: function (status, count, models, model) {
       var badge = document.getElementById('llm-status');
       if (!badge) return;
-      var missing = (models && models.length && model) ? models.indexOf(model) < 0 : false;
-      var text, cls;
-      if (status === 'ok' && missing) {
+      var text, cls, tip = '';
+      /* missing 是状态机自己判出来的（见 llm.js recheck）：端点通了但模型没装。
+         不再靠这里现算 models 里有没有 model —— 那样状态还是 ok，
+         canRoute 照样把消息发给不存在的模型 */
+      if (status === 'missing') {
         text = '已连接，但没有 ' + model;
         cls = 'llm-status llm-status-bad';
+        tip = '这个模型还没安装。在终端运行 ollama pull ' + model + '，再点「重新检测」。'
+          + ((models && models.length) ? '当前已安装：' + models.join('、') + '。' : '');
       } else if (status === 'ok') {
-        text = '已连接（' + (count == null ? 0 : count) + ' 个模型）';
+        text = '已连接' + (count == null ? '（读不到模型列表）' : '（' + count + ' 个模型）');
         cls = 'llm-status llm-status-ok';
       } else if (status === 'checking') {
         text = '检测中…';
@@ -220,6 +224,7 @@
       } else if (status === 'unreachable') {
         text = '未连接';
         cls = 'llm-status llm-status-bad';
+        tip = '连不上接口。确认 Ollama 已启动，然后点「重新检测」。';
       } else if (status === 'unknown') {
         text = '未检测';
         cls = 'llm-status llm-status-off';
@@ -229,6 +234,12 @@
       }
       badge.className = cls;
       badge.textContent = text;
+
+      var tipEl = document.getElementById('llm-status-tip');
+      if (tipEl) {
+        tipEl.textContent = tip;
+        tipEl.hidden = !tip;
+      }
 
       // 连上后把可用模型列表灌进 datalist，面板里换模型不用去命令行查
       var dl = document.getElementById('llm-models');

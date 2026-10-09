@@ -90,6 +90,8 @@ sandbox.window.App.Output = {
       append: c => { if (h.firstAt === null) h.firstAt = Date.now(); h.text += String(c); },
       end: t => { h.closed = true; if (t != null) h.text = String(t); },
       error: e => { h.errored = true; h.errorHtml = String(e); },
+      /* 复读守卫重问前会清屏重来（对应 output.js 的真实 reset） */
+      reset: () => { h.text = ''; h.closed = false; h.resetCount = (h.resetCount || 0) + 1; },
       text: () => h.text
     };
   }
@@ -306,6 +308,66 @@ function say(text) {
   check('走的是聊天路径', log.stream.length === 1, String(log.stream.length));
   soft('答的是时间本身（20:30 / 8:30 的各种写法，或八点半）',
     /(20|8)\s*[：:.点]\s*3?0|八点半/.test(reply5), snip(reply5));
+
+  /* ============ 8. 多轮连问：不许复读上一条 ============ */
+  /* 这题真栽过两次。第一次以为是采样抖动，把历史从纯文本改成 JSON（与 REPLY_SCHEMA 一致），
+     只把复读率从 33% 压到 4% —— 当时这条断言用的是 soft（只警告不判失败），
+     于是残余的复读一直没被发现。后来走真实路径连问 6 个互不相关的问题，实测 80%。
+     三变体对照（各 3 会话）：保留历史 13%、历史折进系统提示+防重复指令仍 13%、
+     完全不带历史 0%。结论是压不住，只能在 Chat.send 里加确定性守卫：照抄就丢掉历史重问一次。
+     有了守卫，用户能看到的逐字复读应该恒为 0，所以这里改成硬断言。详见开发记录第十六篇。 */
+  console.log('\n=== 8. 多轮连问：四问各答各的 ===');
+  const QS = ['你好', '现在是几点', '你是什么模型', '你可以翻译英语吗'];
+  const replies = [];
+  let guarded = 0;
+  for (let round = 0; round < 2; round++) {
+    LLM.Chat.clear();
+    for (let i = 0; i < QS.length; i++) {
+      await say(QS[i]);
+      replies.push((log.stream[0] && log.stream[0].text) || '');
+      if (log.stream[0] && log.stream[0].resetCount) guarded++;
+    }
+  }
+  let dups = 0, pairs = 0;
+  for (let i = 0; i < replies.length; i++) {
+    if (i % QS.length === 0) continue;           // 每轮的第一问没有上文可比
+    pairs++;
+    if (replies[i] && replies[i] === replies[i - 1]) dups++;
+  }
+  const lastHist = LLM.Chat.history[LLM.Chat.history.length - 1];
+  check('历史里 assistant 轮次是 JSON 形式（复读的根因就在这）',
+    !!lastHist && /^\s*\{/.test(lastHist.content), lastHist && snip(lastHist.content));
+  check('四问各答各的（' + pairs + ' 个位置里逐字重复为 0）', dups === 0, dups + ' 次重复');
+  console.log(C.gray + '  守卫触发 ' + guarded + ' 次（0 次也正常，说明模型这次没照抄）' + C.reset);
+  for (let i = 0; i < QS.length; i++) {
+    console.log(C.gray + '  ' + QS[i] + ' → ' + snip(replies[i]) + C.reset);
+  }
+
+  /* ============ 9. 模型没装 / 连不上：说清楚原因，别让用户以为是自己的措辞有问题 ============ */
+  /* 这两条不依赖模型推理，纯看状态机与提示文案，所以是硬断言。
+     场景是真实会遇到的：换了机器没 pull 模型、Ollama 没启动。 */
+  console.log('\n=== 9. 模型没装 / 连不上 ===');
+  const goodCfg = { enabled: true, endpoint: ENDPOINT, model: MODEL };
+
+  await LLM.applyConfig({ enabled: true, endpoint: ENDPOINT, model: 'definitely-not-installed' });
+  check('模型名不在列表里 -> missing（不是 ok）', LLM.status === 'missing', LLM.status);
+  check('missing 时不接管消息（不再白跑一趟拿 404）', LLM.canRoute() === false, String(LLM.canRoute()));
+  log.system.length = 0;
+  const tookMissing = LLM.tryRoute('你好');
+  check('missing 时 tryRoute 直接放行给离线通路', tookMissing === false, String(tookMissing));
+  App.Controller.replyUnparsed(App.Input.parse('你好', { now: App.Clock.now() }));
+  check('提示点名了缺哪个模型', log.system.some(t => t.indexOf('definitely-not-installed') >= 0), snip(log.system.join(' | ')));
+  check('提示给了可照做的命令', log.system.some(t => /ollama pull/.test(t)), snip(log.system.join(' | ')));
+
+  await LLM.applyConfig({ enabled: true, endpoint: 'http://127.0.0.1:59999', model: MODEL });
+  check('端口没人听 -> unreachable', LLM.status === 'unreachable', LLM.status);
+  log.system.length = 0;
+  App.Controller.replyUnparsed(App.Input.parse('你好', { now: App.Clock.now() }));
+  check('提示说清是连不上，并指了「重新检测」',
+    log.system.some(t => /连不上/.test(t) && /重新检测/.test(t)), snip(log.system.join(' | ')));
+
+  await LLM.applyConfig(goodCfg);
+  check('恢复配置后状态回到 ok', LLM.status === 'ok', LLM.status);
 
   return finish();
 })().catch(e => {

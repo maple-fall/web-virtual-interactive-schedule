@@ -450,12 +450,17 @@
        模型超时 / 连不上时它会把原话退回来走同一套回复，
        否则用户等了十几秒，连一句「没太听懂」都收不到 */
     replyUnparsed: function (intent) {
-      var msg = (intent && intent.reasonText) || '没太听懂，可以换个说法。';
+      /* 模型开着却用不了时说「没太听懂」是甩锅：用户问的「你好」「今天天气怎么样」
+         本来就不是日程指令，问题出在模型不可用，不在措辞。这两种情况要分开说 */
+      var llmDown = !!(App.LLM && App.LLM.isEnabled() && !App.LLM.isUsable());
+      var msg = llmDown
+        ? '这个问题我答不上来 —— 本地模型现在用不了，我暂时只认得日程相关的说法。'
+        : ((intent && intent.reasonText) || '没太听懂，可以换个说法。');
       if (intent && intent.examples && intent.examples.length) {
         msg += '<br>你可以这样说：<br>· ' + intent.examples.join('<br>· ');
       }
       App.Output.pet(msg, { mood: 'idle' });
-      App.Bubble.say('没太听懂，再说一次吧～', { ms: 3000 });
+      App.Bubble.say(llmDown ? '这个我答不上来～' : '没太听懂，再说一次吧～', { ms: 3000 });
       if (App.LLM) App.LLM.maybeHint();
     },
 

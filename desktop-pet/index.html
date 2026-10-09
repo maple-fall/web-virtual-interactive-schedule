@@ -46,6 +46,7 @@
         <button type="button" id="llm-recheck" class="btn btn-ghost">重新检测</button>
         <span id="llm-status" class="llm-status llm-status-off">已关闭</span>
       </span>
+      <div id="llm-status-tip" class="llm-status-tip" hidden></div>
       <span class="llm-note">
         只连本机或局域网地址。用 file:// 直接打开时，需先设置环境变量
         <code>OLLAMA_ORIGINS=*</code> 再重启 Ollama，否则浏览器会拦下请求；

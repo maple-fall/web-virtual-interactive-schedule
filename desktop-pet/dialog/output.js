@@ -89,6 +89,18 @@
           paint(true);
           if (div) div.classList.remove('streaming');
         },
+        /* 推翻已上屏的内容重来：llm.js 的复读守卫重问时要用。
+           清空文字并回到可继续 append 的状态（closed 也一并复位） */
+        reset: function () {
+          if (timer) { clearTimeout(timer); timer = null; }
+          text = '';
+          shownLen = -1;
+          closed = false;
+          if (div) {
+            div.classList.add('streaming');
+            paint(true);
+          }
+        },
         error: function (html) {
           if (closed) return;
           closed = true;

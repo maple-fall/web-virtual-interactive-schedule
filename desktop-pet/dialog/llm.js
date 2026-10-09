@@ -469,6 +469,9 @@
       if (!p) { done({ ok: false, error: 'unsupported' }); return; }
 
       p.then(function (res) {
+        /* 404/405 = 这个端点没有 /api/tags，但 /api/chat 可能是好的（非 Ollama 的
+           兼容实现）。放行，只是模型列表读不到：跳过存在性检查，状态照样算连上 */
+        if (res.status === 404 || res.status === 405) { done({ ok: true, count: null, models: [], tags: false }); return; }
         if (!res.ok) { done({ ok: false, error: 'http ' + res.status, status: res.status }); return; }
         res.json().then(function (d) {
           var models = (d && d.models) || [];
@@ -822,6 +825,12 @@
       return msgs;
     },
 
+    /* 不带历史的请求体：复读守卫重问时用。实测这条形态复读率 0%，
+       代价是丢掉多轮上下文 —— 所以只在已经确认照抄之后才走 */
+    messagesBare: function (text) {
+      return [{ role: 'system', content: chatSystem() }, { role: 'user', content: text }];
+    },
+
     remember: function (role, content) {
       this.history.push({ role: role, content: String(content == null ? '' : content) });
       var cap = App.Config.llm.historyTurns * 2;
@@ -830,55 +839,113 @@
 
     clear: function () { this.history = []; },
 
+    /* 上一条 assistant 回复的纯文本；没有则 ''。复读守卫拿它当比对基准 */
+    lastReply: function () {
+      for (var i = this.history.length - 1; i >= 0; i--) {
+        if (this.history[i].role !== 'assistant') continue;
+        var c = String(this.history[i].content);
+        var o = parseJsonLoose(c);
+        return (o && typeof o.reply === 'string') ? o.reply.trim() : c.trim();
+      }
+      return '';
+    },
+
+    /* 用户上一句问的是什么。用户连着问同一句话时不算复读，别把正常的重复当 bug 修掉 */
+    lastUser: function () {
+      for (var i = this.history.length - 1; i >= 0; i--) {
+        if (this.history[i].role === 'user') return String(this.history[i].content).trim();
+      }
+      return '';
+    },
+
     /* 由 _route 在队列内调用：视频交互 + 流式渲染 + 收尾动画 */
     send: function (text) {
       var self = this;
       var LLM = App.LLM;
       var tempMs = App.Config.tempMs;
+      var cfg = App.Config.llm;
 
       // 「交流中」：循环播放，一直举着手说话；回复回来时主动收掉（endTemp）
       App.StateMachine.enqueueTemp('talking', null, tempMs.talking, { loop: true });
       App.Bubble.say('让我想想…', { ms: 4000 });
 
       var handle = App.Output.stream({ mood: 'idle', render: mdToHtml });
-      var reader = replyReader();
-      var shown = 0;
+      var prev = this.lastReply();      // 基准要在写历史之前取
 
-      return chatStream(self.messages(text), {
-        temperature: 0.7,
-        numPredict: App.Config.llm.chatMaxTokens,
-        timeoutMs: App.Config.llm.chatTimeoutMs,
-        format: REPLY_SCHEMA
-      }, function (piece) {
-        var out = reader.feed(piece);
-        if (out.length > shown) {
-          handle.append(out.slice(shown));
-          shown = out.length;
-        }
-      }).then(function (r) {
+      /* 发一次请求并流式上屏，收尾做 JSON 解析。返回 {ok:true,text} 或 {ok:false,r} */
+      function ask(messages) {
+        var reader = replyReader(), shown = 0;
+        return chatStream(messages, {
+          temperature: 0.7,
+          numPredict: cfg.chatMaxTokens,
+          timeoutMs: cfg.chatTimeoutMs,
+          format: REPLY_SCHEMA
+        }, function (piece) {
+          var out = reader.feed(piece);
+          if (out.length > shown) {
+            handle.append(out.slice(shown));
+            shown = out.length;
+          }
+        }).then(function (r) {
+          if (!r.ok) return { ok: false, r: r };
+          // 收全了以 JSON.parse 为准；解不出来就退回原文剥思考块
+          var final = reader.text();
+          var parsed = parseJsonLoose(reader.raw());
+          if (parsed && typeof parsed.reply === 'string') final = parsed.reply;
+          final = (final.trim() || stripThink(reader.raw())).trim();
+          return { ok: true, text: final };
+        });
+      }
+
+      /* 请求失败：说清原因并把端点打回正确状态 */
+      function fail(r) {
         App.StateMachine.endTemp('talking');
+        LLM.note(r.code, r.status);
+        handle.error('本地模型没能回上话（' + errText(r) + '）。');
+        if (r.code === 'network') LLM.degrade();
+        else if (r.code === 'http' && (r.status === 404 || r.status === 405)) LLM.degrade('missing');
+      }
 
-        if (!r.ok) {
-          LLM.note(r.code, r.status);
-          handle.error('本地模型没能回上话（' + errText(r) + '）。');
-          if (r.code === 'network') LLM.degrade();
-          return;
-        }
+      /* 答不上来：不把照抄的内容留在屏幕上，也不写进历史（它本来就没什么信息量） */
+      function giveUp() {
+        App.StateMachine.endTemp('talking');
+        handle.reset();
+        handle.end('这个问题我暂时答不上来～换个问法试试？');
+        App.StateMachine.enqueueTemp('done', null, tempMs.done);
+      }
 
-        // 收全了以 JSON.parse 为准；解不出来就退回原文剥思考块
-        var final = reader.text();
-        var parsed = parseJsonLoose(reader.raw());
-        if (parsed && typeof parsed.reply === 'string') final = parsed.reply;
-        final = final.trim() || stripThink(reader.raw());
-
-        if (!final) {
-          handle.error('本地模型没有返回内容。');
-          return;
-        }
+      function finish(final) {
+        App.StateMachine.endTemp('talking');
         handle.end(final);
         self.remember('user', text);
-        self.remember('assistant', final);
+        /* 历史里的 assistant 轮次必须**保持 JSON 形式**，和 REPLY_SCHEMA 一致。
+           存纯文本会诱发复读：实测 qwen3:4b 四问连问，复读率 33%（8 次跑每次都是 1/3），
+           改成 JSON 后降到 4%。原因是系统提示要求「只输出一个 JSON 对象」，
+           而纯文本的历史等于让模型看见自己上一条违反了格式约定，小模型就顺着照抄上一条。
+           降 temperature 到 0.3、加「不要重复」指令都压不住（各自仍是 33% / 22%），
+           说明这是结构问题不是采样抖动。详见开发记录第十四、十六篇。 */
+        self.remember('assistant', JSON.stringify({ reply: final }));
         App.StateMachine.enqueueTemp('done', null, tempMs.done);
+      }
+
+      return ask(self.messages(text)).then(function (a) {
+        if (!a.ok) { fail(a.r); return; }
+        if (!a.text) { giveUp(); return; }
+
+        /* 复读守卫。小模型（qwen3:4b）在带多轮历史时会逐字照抄上一条 assistant：
+           走真实路径连问 6 个互不相关的问题，复读率 80%；三变体对照里保留历史 13%、
+           把历史折进系统提示仍是 13%，只有完全不带历史的形态是 0%。
+           既然改提示词压不住，就不跟模型较劲：发现逐字相同就丢掉历史重问一次
+           （等价于那个 0% 的形态），仍然照抄才认输。 */
+        if (prev && a.text === prev && text.trim() !== self.lastUser()) {
+          handle.reset();
+          return ask(self.messagesBare(text)).then(function (b) {
+            if (!b.ok) { fail(b.r); return; }
+            if (!b.text || b.text === prev) { giveUp(); return; }
+            finish(b.text);
+          });
+        }
+        finish(a.text);
       });
     }
   };
@@ -933,14 +1000,18 @@
     },
 
     /* 能不能接管这条消息：unknown/checking 也算（队列里会先补一次探活，
-       连不上就在聊天里说明并降级，不会把用户的话吞掉） */
+       连不上就在聊天里说明并降级，不会把用户的话吞掉）。
+       missing 不算：模型没装，接管了也只会拿到 404 */
     canRoute: function () {
       if (!this.cfg.enabled || nollm) return false;
-      return this.status !== 'off' && this.status !== 'unreachable';
+      return this.status !== 'off' && this.status !== 'unreachable' && this.status !== 'missing';
     },
 
     setStatus: function (s, extra) {
       if (this.status === s && !extra) return;
+      /* 状态真的换了就重新武装提示：从「模型没装」变成「连不上」是另一个问题，
+         用户该再看到一次说明；同一条消息连发时状态不变，所以不会刷屏 */
+      if (this.status !== s) this._noted = false;
       this.status = s;
       var p = { status: s, count: 0, models: this.models.slice(), endpoint: this.cfg.endpoint };
       if (extra) { for (var k in extra) if (extra.hasOwnProperty(k)) p[k] = extra[k]; }
@@ -965,7 +1036,10 @@
         if (App.bus && App.bus.emit) App.bus.emit('llm:status', { status: 'off', endpoint: next.endpoint });
         return Promise.resolve({ ok: false, error: 'off' });
       }
-      if (endpointChanged || modelChanged || enableChanged || this.status === 'off') {
+      /* missing 也要重探：用户看到「没有这个模型」后多半会去 ollama pull，
+         回来点「保存」得能看到结果，不能只有「重新检测」按钮管用 */
+      if (endpointChanged || modelChanged || enableChanged ||
+          this.status === 'off' || this.status === 'missing') {
         return this.recheck();
       }
       return Promise.resolve({ ok: this.status === 'ok' });
@@ -989,7 +1063,13 @@
         if (!self.cfg.enabled || nollm) { self.setStatus('off'); return r; }
         if (r.ok) {
           self.models = r.models || [];
-          self.setStatus('ok', { count: r.count });
+          /* 端点通了不代表模型下载了。只探活不校验模型名的话，状态会停在 ok，
+             于是每条消息都发给一个不存在的模型、每条都收 404 —— 用户等半天换来一句
+             「没太听懂」。这里直接把「模型不在列表里」判成独立状态，canRoute 会拒绝接管，
+             提示也能说清是没装模型而不是用户措辞有问题。
+             tags:false（端点没有 /api/tags）时读不到列表，跳过这项检查。 */
+          var missing = r.tags === false ? false : self.models.indexOf(self.cfg.model) < 0;
+          self.setStatus(missing ? 'missing' : 'ok', { count: r.count });
         } else {
           self.models = [];
           self.setStatus('unreachable', { error: r.error });
@@ -1005,32 +1085,48 @@
     ensureReady: function () {
       var self = this;
       if (this.status === 'ok') return Promise.resolve(true);
-      if (this.status === 'unreachable' || this.status === 'off') return Promise.resolve(false);
-      return this.recheck().then(function (r) { return !!r.ok; });
+      if (this.status === 'unreachable' || this.status === 'off' || this.status === 'missing') {
+        return Promise.resolve(false);
+      }
+      return this.recheck().then(function (r) { return !!r.ok && self.status === 'ok'; });
     },
 
-    /* 端点被降级（发不出去 / 连不上）时把状态打回未连接 */
-    degrade: function () {
-      if (this.status === 'ok' || this.status === 'checking') {
-        this.setStatus('unreachable', { error: 'network' });
+    /* 端点被降级（发不出去 / 连不上）时把状态打回未连接。
+       传 'missing' 用于「端点活着但说没有这个模型」（聊天/意图请求收 404）的情况 */
+    degrade: function (to) {
+      if (this.status === 'ok' || this.status === 'checking' || this.status === 'missing') {
+        if (to === 'missing') this.setStatus('missing', { error: 'http 404' });
+        else this.setStatus('unreachable', { error: 'network' });
       }
     },
 
-    /* 会话内只提示一次：连不上时把「已回退离线模式」说清楚 */
+    /* 会话内只提示一次：连不上时把「已回退离线模式」说清楚。
+       文案不带端点 URL 和 HTTP 码 —— 那些在设置面板里，聊天窗里只说人话 */
     note: function (code, status) {
       if (this._noted || !this.cfg.enabled || nollm) return;
       this._noted = true;
+      if (this.status === 'missing') { this.hintText(); return; }
       var why = code === 'http' ? '（HTTP ' + status + '）' : '';
-      App.Output.system('本地模型暂时用不了，这条先按离线模式处理' + why + '。' +
-        '端点：' + this.cfg.endpoint);
+      App.Output.system('本地模型暂时用不了' + why + '，这条先按离线模式处理。' +
+        '可以在设置里点「重新检测」再试。');
     },
 
     /* Controller 兜底分支调用：开关开着却没接住时，说明为什么 */
     maybeHint: function () {
       if (this._noted || !this.cfg.enabled || nollm) return;
       this._noted = true;
-      App.Output.system('本地模型未连接，已使用离线模式。' +
-        '（端点 ' + this.cfg.endpoint + '，点顶部「本地模型」按钮可重新检测）');
+      App.Output.system(this.hintText());
+    },
+
+    /* 按当前状态给一句能照做的提示（note / maybeHint 共用） */
+    hintText: function () {
+      if (this.status === 'missing') {
+        return '本地模型还没安装「' + this.cfg.model + '」，这条先按离线模式处理。' +
+          '在终端运行 ollama pull ' + this.cfg.model + '，再回设置里点「重新检测」。' +
+          (this.models.length ? '当前已安装：' + this.models.join('、') + '。' : '');
+      }
+      return '本地模型连不上，已使用离线模式。' +
+        '确认 Ollama 已启动后，在设置里点「重新检测」。';
     },
 
     /* 队列排空（测试用：tryRoute 是同步返回 + 异步干活，断言前要等它跑完） */
@@ -1056,6 +1152,8 @@
             // 提取本身失败（超时 / 连不上 / 输出没法解析）：状态降级 + 一条提示，
             // 然后把这句话交回离线通路 —— 用户等了十几秒，不能什么交代都没有
             if (r.code === 'network') self.degrade();
+            else if (r.code === 'http' && r.status === 404) self.degrade('missing');
+            else if (r.code === 'http' && r.status === 405) self.degrade('missing');
             self.note(r.code, r.status);
             offlineFallback(text);
           });
