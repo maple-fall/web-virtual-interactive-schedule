@@ -37,6 +37,7 @@ function el(tag) {
     },
     contains(n) { if (n === this) return true; return (this.children || []).some(k => k.contains && k.contains(n)); },
     addEventListener(t, fn) { (this._listeners[t] = this._listeners[t] || []).push(fn); },
+    click() { this._clicks = (this._clicks || 0) + 1; this.fire('click'); },
     // 模拟事件冒泡：先在自身触发，再逐级向父节点传播（target 始终是起始元素）
     fire(t, ev) {
       const target = this;
@@ -48,8 +49,41 @@ function el(tag) {
   return e;
 }
 
+// canvas 需要额外的 2d 上下文与导出接口
+let nextCanvasDataUrl = null;
+const canvases = [];
+function canvasEl() {
+  const c = el('canvas');
+  c.width = 0;
+  c.height = 0;
+  c._fillRects = [];
+  c._draws = [];
+  c._toDataURL = [];
+  c._dataUrl = nextCanvasDataUrl || 'data:image/jpeg;base64,AAAA';
+  nextCanvasDataUrl = null;
+  c.getContext = () => ({
+    fillStyle: '',
+    fillRect(x, y, w, h) { c._fillRects.push([x, y, w, h]); },
+    drawImage(...a) { c._draws.push(a.length); }
+  });
+  c.toDataURL = (mime, q) => { c._toDataURL.push([mime, q]); return c._dataUrl; };
+  canvases.push(c);
+  return c;
+}
+const lastCanvas = () => canvases[canvases.length - 1];
+
+// FileReader / Image：只记录实例，回调由测试手动触发，便于精确控制异步时序
+const readers = [];
+function FakeFileReader() { this.result = null; this.onload = null; this.onerror = null; readers.push(this); }
+FakeFileReader.prototype.readAsDataURL = function (f) { this._file = f; };
+
+const images = [];
+function FakeImage() { this.naturalWidth = 0; this.naturalHeight = 0; this.onload = null; this.onerror = null; images.push(this); }
+const lastImage = () => images[images.length - 1];
+
 const els = {
   stage: el('div'), 'btn-bg-clear': el('button'), 'bg-picker': el('div'), 'btn-bg': el('button'),
+  'file-bg': el('input'),
   // 壁纸相关元素：本文件不测壁纸逻辑，但 init/bindUI 会碰到它们，缺了会走不进来
   body: el('body'), 'btn-wallpaper': el('button'), 'btn-wallpaper-clear': el('button'),
   'wallpaper-picker': el('div'), 'file-wallpaper': el('input')
@@ -79,11 +113,13 @@ sandbox.localStorage = {
   removeItem: k => { delete store[k]; }
 };
 function DOMException_Quota() { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; return e; }
+sandbox.FileReader = FakeFileReader;
+sandbox.Image = FakeImage;
 sandbox.document = {
   readyState: 'loading',
   addEventListener: () => {},
   getElementById: id => els[id] || null,
-  createElement: t => el(t),
+  createElement: t => (t === 'canvas' ? canvasEl() : el(t)),
   createDocumentFragment: () => el('#fragment'),
   body: els.body
 };
@@ -119,15 +155,42 @@ function storedOk(expect) {
 
 const S = App.Settings;
 const PRESET = 'data/backgrounds/bg1.jpg';
+const KEY = App.Config.settingsKey;
+
+// 面板里的缩略图（fragment 是 picker 唯一子节点）
+const pickerItems = () => (els['bg-picker'].children[0] || { children: [] }).children;
+const selectedThumbs = () => els['bg-picker'].querySelectorAll('[data-path]')
+  .filter(b => b.classList.contains('selected'));
+// 自定义缩略图是没有 data-path 的 span
+const customThumb = () => pickerItems().find(n => n.tagName === 'span' && n.className.indexOf('bg-thumb') >= 0);
+
+// 走一遍完整导入：造 File → fire change → 手动触发 reader/img 回调
+function importImage({ type = 'image/png', size = 1000, w = 640, h = 480, dataUrl } = {}) {
+  const file = { type, size };
+  const before = readers.length;
+  els['file-bg'].files = [file];
+  els['file-bg'].fire('change');
+  if (readers.length === before) return null;      // 被前置校验拦下，没进读取阶段
+  const reader = readers[readers.length - 1];
+  reader.result = 'data:image/png;base64,iVBORw0KGgo=';
+  reader.onload();
+  const img = lastImage();
+  img.naturalWidth = w;
+  img.naturalHeight = h;
+  if (dataUrl) nextCanvasDataUrl = dataUrl;
+  img.onload();
+  return img;
+}
 
 console.log('\n=== 用例 1：初始无设置 ===');
 S.init();
 check('不设置背景图', els.stage.style.backgroundImage === '', JSON.stringify(els.stage.style.backgroundImage));
 check('无 has-bg class', !els.stage.classList.contains('has-bg'));
 check('清除按钮隐藏', els['btn-bg-clear'].hidden === true);
-check('面板已生成选项（提示语 + 无 + 1 预设）', els['bg-picker'].children.length === 1 &&
-  els['bg-picker'].children[0].children.length === 3,
-  'children=' + els['bg-picker'].children[0].children.length);
+check('面板已生成选项（提示语 + 无 + 1 预设 + 导入按钮）', els['bg-picker'].children.length === 1 &&
+  pickerItems().length === 4,
+  'children=' + pickerItems().length);
+check('导入按钮带 data-action', pickerItems()[3].dataset.action === 'import');
 
 console.log('\n=== 用例 2：选择预设 ===');
 msgs.length = 0;
@@ -205,6 +268,62 @@ check('点击缩略图应用背景', els.stage.style.backgroundImage.indexOf(PRE
 const noneBtn = els['bg-picker'].querySelectorAll('[data-path]').filter(b => b.dataset.path === '')[0];
 noneBtn.fire('click');
 check('点击「无」清除背景', els.stage.style.backgroundImage === '');
+
+console.log('\n=== 用例 10：导入本地图片（成功链路）===');
+canvases.length = 0;
+msgs.length = 0;
+els['file-bg'].value = 'C:\\fakepath\\x.png';
+importImage({ w: 4000, h: 3000 });
+const c10 = lastCanvas();
+check('canvas 等比缩到最长边 1920', c10.width === 1920 && c10.height === 1440,
+  c10.width + 'x' + c10.height);
+check('先铺底色再画图（透明 PNG 不产生黑底）',
+  c10._fillRects.length === 1 && c10._draws.length === 1);
+check('导出为 JPEG q0.8', c10._toDataURL.length === 1 &&
+  c10._toDataURL[0][0] === 'image/jpeg' && c10._toDataURL[0][1] === 0.8,
+  JSON.stringify(c10._toDataURL));
+check('data URL 写入设置',
+  storedOk({ bg: 'data:image/jpeg;base64,AAAA', wallpaper: null }), store[KEY]);
+check('舞台立即生效', els.stage.style.backgroundImage.indexOf('url("data:image/jpeg') > 0 &&
+  els.stage.classList.contains('has-bg'), els.stage.style.backgroundImage);
+check('面板出现自定义缩略图并选中',
+  customThumb() !== undefined && customThumb().className.indexOf('selected') >= 0,
+  customThumb() && customThumb().className);
+check('预设缩略图都不再选中', selectedThumbs().length === 0);
+check('file input 已重置（同一张图可再次选择）', els['file-bg'].value === '',
+  JSON.stringify(els['file-bg'].value));
+check('给出成功反馈', msgs.some(m => m.indexOf('已压缩到最长边') > 0), JSON.stringify(msgs));
+
+console.log('\n=== 用例 11：刷新后恢复导入的背景 ===');
+els.stage.style.backgroundImage = '';
+els.stage.classList.remove('has-bg');
+S.init();
+check('导入背景被恢复', els.stage.style.backgroundImage.indexOf('url("data:image/jpeg') > 0,
+  els.stage.style.backgroundImage);
+check('has-bg 恢复', els.stage.classList.contains('has-bg'));
+check('自定义缩略图恢复并选中',
+  customThumb() !== undefined && customThumb().className.indexOf('selected') >= 0);
+
+console.log('\n=== 用例 12：导入时配额满 ===');
+quotaFull = true;
+msgs.length = 0;
+const beforeBg = S.bg;
+importImage({});
+check('提示用户', msgs.some(m => m.startsWith('error:')), JSON.stringify(msgs));
+check('内存状态未变更', S.bg === beforeBg, String(S.bg));
+quotaFull = false;
+
+console.log('\n=== 用例 13：不可信的存储值兜底 ===');
+[
+  ['svg data URL', 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='],
+  ['非白名单路径', 'data/backgrounds/../evil.jpg'],
+  ['数字', 12345]
+].forEach(([label, v]) => {
+  store[KEY] = JSON.stringify({ bg: v, wallpaper: null });
+  S.init();
+  check(label + ' → 归一为无背景', S.bg === null &&
+    els.stage.style.backgroundImage === '', String(S.bg).slice(0, 40));
+});
 
 console.log('\n--- 结果：' + pass + ' 通过 / ' + fail + ' 失败 ---\n');
 process.exit(fail ? 1 : 0);

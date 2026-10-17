@@ -32,9 +32,9 @@
   // 压太深就只剩一片深蓝。文字对比度主要由面板自身的 .8 不透明度兜底，这里可以给得浅一些
   var WALLPAPER_OVERLAY = 'linear-gradient(rgba(15,19,34,.35), rgba(15,19,34,.35)), ';
 
-  var WALLPAPER_MAX_EDGE = 1920;                 // 导入图片最长边上限（超出等比缩小）
-  var WALLPAPER_QUALITY = 0.8;                   // 重编码 JPEG 质量
-  var WALLPAPER_MAX_LEN = 6 * 1024 * 1024;       // data URL 字符数上限，防坏数据撑爆内存
+  var IMAGE_MAX_EDGE = 1920;                     // 导入图片最长边上限（超出等比缩小）
+  var IMAGE_QUALITY = 0.8;                       // 重编码 JPEG 质量
+  var MAX_DATA_URL_LEN = 6 * 1024 * 1024;        // data URL 字符数上限，防坏数据撑爆内存
   var MAX_IMPORT_BYTES = 20 * 1024 * 1024;       // 源文件大小上限，防解码爆内存
   var DATA_URL_RE = /^data:image\/(jpeg|png|webp|gif);base64,/;
 
@@ -77,17 +77,26 @@
     return Math.max(1, Math.round(bytes / 1024)) + ' KB';
   }
 
-  /* 校验壁纸值：预设路径（白名单）或位图 data URL（拒绝 svg 等可执行格式） */
-  function sanitizeWallpaper(v) {
+  /* 校验背景/壁纸值：预设路径（白名单）或位图 data URL（拒绝 svg 等可执行格式）。
+     两者规则相同，只是预设清单不同；不在白名单的一律视为未设置 */
+  function sanitizeImageChoice(v, presets) {
     if (typeof v !== 'string' || !v) return null;
     if (v.indexOf('data:image/') === 0) {
-      if (!DATA_URL_RE.test(v) || v.length > WALLPAPER_MAX_LEN) return null;
+      if (!DATA_URL_RE.test(v) || v.length > MAX_DATA_URL_LEN) return null;
       return v;
     }
-    for (var i = 0; i < WALLPAPER_PRESETS.length; i++) {
-      if (WALLPAPER_PRESETS[i].path === v) return v;
+    for (var i = 0; i < presets.length; i++) {
+      if (presets[i].path === v) return v;
     }
-    return null;   // 不在白名单，视为无壁纸
+    return null;
+  }
+
+  function sanitizeBg(v) {
+    return sanitizeImageChoice(v, PRESETS);
+  }
+
+  function sanitizeWallpaper(v) {
+    return sanitizeImageChoice(v, WALLPAPER_PRESETS);
   }
 
   /* ---------------- 本地大模型配置 ----------------
@@ -133,7 +142,7 @@
       var data = JSON.parse(raw);
       if (!data || typeof data !== 'object') return empty;
       return {
-        bg: typeof data.bg === 'string' ? data.bg : null,
+        bg: sanitizeBg(data.bg),
         wallpaper: sanitizeWallpaper(data.wallpaper),
         llm: sanitizeLlm(data.llm),     // 被篡改成公网地址时在这里回落到默认端点
         character: sanitizeCharacter(data.character)
@@ -319,8 +328,8 @@
       var clearBtn = document.getElementById('btn-bg-clear');
       if (clearBtn) clearBtn.hidden = !this.bg;
 
-      var picker = document.getElementById('bg-picker');
-      if (picker) this.syncPickerSelection(picker);
+      // 重建而不仅是同步选中态：导入的 data URL 缩略图只在面板展开时按需生成
+      this.buildPicker();
       // 画中画开着时不用额外通知：搬过去的正是 #stage 本身，inline 背景就地生效
     },
 
@@ -394,24 +403,25 @@
       App.Bubble.say('壁纸已清除', { ms: 2500 });
     },
 
-    /* 导入本地图片：读成 data URL → 等比缩到最长边 ≤1920 → JPEG → 存进设置
-       用 data URL 作画源不会被判跨源，canvas 不会被污染（本地文件路径则会） */
-    importWallpaper: function (file) {
-      var self = this;
+    /* 导入本地图片的统一流程：读成 data URL → 等比缩到最长边 ≤IMAGE_MAX_EDGE → JPEG。
+       用 data URL 作画源不会被判跨源，canvas 不会被污染（本地文件路径则会）。
+       onReady(dataUrl, fail)：调用方负责保存与应用；保存失败时调 fail(标题, 气泡文案) */
+    _importImageFile: function (file, onReady) {
       if (!file) return;                                   // 用户取消选择
-      if (file.type && file.type.indexOf('image/') !== 0) {
-        App.Output.error('这个文件不是图片。');
-        App.Bubble.say('要选图片文件哦', { ms: 3000 });
-        return;
-      }
-      if (file.size > MAX_IMPORT_BYTES) {
-        App.Output.error('图片太大了（超过 ' + (MAX_IMPORT_BYTES / 1024 / 1024) + 'MB），换一张吧。');
-        return;
-      }
 
       function fail(msg, tip) {
         App.Output.error(msg);
         App.Bubble.say(tip, { ms: 3500 });
+      }
+
+      if (file.type && file.type.indexOf('image/') !== 0) {
+        fail('这个文件不是图片。', '要选图片文件哦');
+        return;
+      }
+      if (file.size > MAX_IMPORT_BYTES) {
+        fail('图片太大了（超过 ' + (MAX_IMPORT_BYTES / 1024 / 1024) + 'MB），换一张吧。',
+          '图片太大，换一张试试');
+        return;
       }
 
       var reader = new FileReader();
@@ -427,7 +437,7 @@
           var w = img.naturalWidth, h = img.naturalHeight;
           if (!w || !h) { img.onerror(); return; }         // SVG 无固有尺寸等场景
 
-          var scale = Math.min(1, WALLPAPER_MAX_EDGE / Math.max(w, h));   // 只缩不放
+          var scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(w, h));   // 只缩不放
           var cw = Math.max(1, Math.round(w * scale));
           var ch = Math.max(1, Math.round(h * scale));
 
@@ -442,28 +452,49 @@
 
           var dataUrl = null;
           try {
-            dataUrl = canvas.toDataURL('image/jpeg', WALLPAPER_QUALITY);
+            dataUrl = canvas.toDataURL('image/jpeg', IMAGE_QUALITY);
           } catch (e) { /* 理论不可达：data URL 图源不污染画布 */ }
           if (!dataUrl || dataUrl.indexOf('data:image/jpeg') !== 0 ||
-              dataUrl.length > WALLPAPER_MAX_LEN) {
-            fail('图片处理失败，换一张小一点的试试。', '壁纸没换成，换张图试试');
+              dataUrl.length > MAX_DATA_URL_LEN) {
+            fail('图片处理失败，换一张小一点的试试。', '这张图没处理成功，换张试试');
             return;
           }
-          if (!save({ bg: self.bg, wallpaper: dataUrl })) {
-            fail('壁纸保存失败，浏览器存储空间可能已满。', '壁纸存不上，换张小图试试');
-            return;
-          }
-          self.wallpaper = dataUrl;
-          self.applyWallpaper();
-          App.Output.system('界面壁纸已更新（已压缩到最长边 ' + WALLPAPER_MAX_EDGE + 'px 内）。');
-          App.Bubble.say('壁纸换好啦～', { ms: 2500 });
+          onReady(dataUrl, fail);
         };
         img.src = String(reader.result);
       };
       reader.readAsDataURL(file);
     },
 
-    /* 按 PRESETS 生成舞台背景缩略图 */
+    importBg: function (file) {
+      var self = this;
+      this._importImageFile(file, function (dataUrl, fail) {
+        if (!save({ bg: dataUrl, wallpaper: self.wallpaper })) {
+          fail('背景保存失败，浏览器存储空间可能已满。', '背景存不上，换张小图试试');
+          return;
+        }
+        self.bg = dataUrl;
+        self.applyToStage();
+        App.Output.system('舞台背景已更新（已压缩到最长边 ' + IMAGE_MAX_EDGE + 'px 内）。');
+        App.Bubble.say('背景换好啦～', { ms: 2500 });
+      });
+    },
+
+    importWallpaper: function (file) {
+      var self = this;
+      this._importImageFile(file, function (dataUrl, fail) {
+        if (!save({ bg: self.bg, wallpaper: dataUrl })) {
+          fail('壁纸保存失败，浏览器存储空间可能已满。', '壁纸存不上，换张小图试试');
+          return;
+        }
+        self.wallpaper = dataUrl;
+        self.applyWallpaper();
+        App.Output.system('界面壁纸已更新（已压缩到最长边 ' + IMAGE_MAX_EDGE + 'px 内）。');
+        App.Bubble.say('壁纸换好啦～', { ms: 2500 });
+      });
+    },
+
+    /* 按 PRESETS 生成舞台背景缩略图，外加导入按钮 */
     buildPicker: function () {
       var picker = document.getElementById('bg-picker');
       if (!picker) return;
@@ -490,6 +521,23 @@
         btn.style.backgroundImage = 'url("' + p.path + '")';
         frag.appendChild(btn);
       });
+
+      // 当前背景若是导入的 data URL，用一个只读缩略图展示现状。
+      // 刻意不给 data-path：委托查找会跳过它，也避免把巨长的 base64 写进 DOM 属性
+      if (this.bg && this.bg.indexOf('data:image/') === 0) {
+        var cur = document.createElement('span');
+        cur.className = 'bg-thumb selected';
+        cur.title = '当前自定义背景';
+        cur.style.backgroundImage = 'url("' + this.bg + '")';
+        frag.appendChild(cur);
+      }
+
+      var imp = document.createElement('button');
+      imp.type = 'button';
+      imp.className = 'bg-import';
+      imp.dataset.action = 'import';
+      imp.textContent = '本地图片…';
+      frag.appendChild(imp);
 
       picker.innerHTML = '';
       picker.appendChild(frag);
@@ -1047,6 +1095,7 @@
       var wPicker = document.getElementById('wallpaper-picker');
       var lPicker = document.getElementById('llm-picker');
       var cPicker = document.getElementById('char-picker');
+      var fileBg = document.getElementById('file-bg');
       var fileInput = document.getElementById('file-wallpaper');
       var fileChar = document.getElementById('file-character');
       var btnBg = document.getElementById('btn-bg');
@@ -1075,17 +1124,31 @@
         });
       }
 
-      // 事件委托：从点击目标向上找带 data-path 的按钮（不依赖 closest）
+      // 事件委托：从点击目标向上找带 data-action 或 data-path 的按钮（不依赖 closest）
       if (picker) {
         picker.addEventListener('click', function (e) {
           var t = e.target;
-          while (t && t !== picker && !(t.dataset && typeof t.dataset.path === 'string')) {
+          while (t && t !== picker && !(t.dataset &&
+                 (typeof t.dataset.action === 'string' || typeof t.dataset.path === 'string'))) {
             t = t.parentNode;
           }
           if (!t || t === picker || !t.dataset) return;
+          if (t.dataset.action === 'import') {
+            if (fileBg) fileBg.click();
+            return;
+          }
           var path = t.dataset.path;
           if (path) self.select(path);
           else self.clearBg();
+        });
+      }
+
+      if (fileBg) {
+        fileBg.addEventListener('change', function (e) {
+          var f = e.target && e.target.files && e.target.files[0];
+          if (f) self.importBg(f);
+          // 置空，同一张图才能再次被选中；File 已被 readAsDataURL 同步持有，不受影响
+          e.target.value = '';
         });
       }
 

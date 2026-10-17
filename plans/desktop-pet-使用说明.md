@@ -503,7 +503,7 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 | 按钮 | 更换背景 | 界面壁纸 |
 | 作用范围 | 只铺在宠物舞台那块 | 铺满整个窗口，像电脑桌面壁纸 |
 | 预设 | 1 张（紫色，放 `data/backgrounds/`） | 1 张（中山装·人生哲理，放 `data/wallpapers/`） |
-| 能导入本地图片 | ❌ | ✅ |
+| 能导入本地图片 | ✅ | ✅ |
 
 > 两者的图片**分开放**：舞台背景在 `data/backgrounds/`，界面壁纸在 `data/wallpapers/`。
 > 换壁纸的面板里只会列出 `data/wallpapers/` 下的图，不会混进背景图。
@@ -511,6 +511,8 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 ### 舞台背景
 
 点 **「更换背景」**，展开一排缩略图，点一张就换上了；点「无」恢复纯色。也可以点顶栏的 **「清除背景」**。
+
+点 **「本地图片…」** 可以选自己电脑上的图当舞台背景，处理方式与界面壁纸相同（等比压到最长边不超过 1920 像素，转成 JPEG），原图不动。
 
 ### 界面壁纸
 
