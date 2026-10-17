@@ -331,13 +331,43 @@
 
     if (kind === 'query') {
       var qToken = (raw.date == null ? null : raw.date);
-      var qDate = resolveDateToken(qToken, today) || today;
+      var qResolved = resolveDateToken(qToken, today);
+      var qDate = qResolved || today;
+      var qTitle = trimTitle(raw.title != null ? raw.title : raw.targetTitle);
+      var qAfter = normalizeTime(raw.after != null ? raw.after : raw.from);
+      var qBefore = normalizeTime(raw.before != null ? raw.before : raw.to);
+      var qNext = raw.next === true;
+      var qEta = raw.eta === true || raw.askEta === true;
+      var qCat = null;
+      var catRaw = String(raw.category == null ? '' : raw.category).toLowerCase();
+      if (catRaw === 'studying' || catRaw === '学习') qCat = 'studying';
+      else if (catRaw === 'working' || catRaw === '工作') qCat = 'working';
+      else if (catRaw === 'general' || catRaw === '通用') qCat = 'general';
+
+      var qWindow = null;
+      if (qAfter && qBefore) qWindow = qAfter + '–' + qBefore;
+      else if (qAfter) qWindow = qAfter + ' 后';
+      else if (qBefore) qWindow = qBefore + ' 前';
+
       return {
         ok: true, intent: 'query',
         date: qDate, targetDate: qDate,
         startTime: null, endTime: null, title: null,
         category: null, target: null, patches: null,
-        query: { scope: resolveDateToken(qToken, today) ? 'date' : 'today', remainingOnly: true },
+        query: {
+          scope: qResolved ? 'date' : 'today',
+          // 给了「某点前」时通常是在问那段时间发生了什么，历史也要算；
+          // 其余查询维持原来的「只看剩余」语义
+          remainingOnly: !qBefore || qNext || qEta,
+          fromMin: qAfter ? App.util.hmToMin(qAfter) : null,
+          toMin: qBefore ? App.util.hmToMin(qBefore) : null,
+          windowLabel: qWindow,
+          titleFrag: qTitle || null,
+          category: qCat,
+          askEta: qEta,
+          next: qNext,
+          limit: qNext ? 1 : null
+        },
         defaultsUsed: []
       };
     }
@@ -610,7 +640,8 @@
       '修改日程：{"intent":"update","targetDate":"日期词","targetTitle":"要改哪一条",' +
       '"targetStart":"HH:MM","patch":{"date":"日期词","start":"HH:MM"}}\n' +
       '删除日程：{"intent":"delete","date":"日期词","title":"要删的事项","start":"HH:MM"}\n' +
-      '查询日程：{"intent":"query","date":"日期词"}\n' +
+      '查询日程：{"intent":"query","date":"日期词","after":"HH:MM","before":"HH:MM",' +
+      '"title":"事项关键词","next":true,"eta":true}\n' +
       '复制整天：{"intent":"copy","from":"源日期词","to":"目标日期词"}\n' +
       '闲聊或与日程无关：{"intent":"chat"}\n\n' +
       '规则：\n' +
@@ -619,7 +650,10 @@
       '2. start / end 用 24 小时制 HH:MM，如 15:00。\n' +
       '3. add 必须同时有 start 和 title；缺任何一个就输出 {"intent":"chat"}。\n' +
       '4. update 必须同时给出 patch（改成什么）和 targetTitle 或 targetStart（改哪一条）。\n' +
-      '5. 打招呼、提问、感慨、与日程无关的话，一律输出 {"intent":"chat"}。\n\n' +
+      '5. query 只填用户真正提到的字段：问「几点后」填 after，问「几点前」填 before，' +
+      '问某个事项填 title，问「下一项」把 next 设为 true，问「还有多久」把 eta 设为 true；' +
+      '其余字段不要编。\n' +
+      '6. 打招呼、提问、感慨、与日程无关的话，一律输出 {"intent":"chat"}。\n\n' +
       '示例：\n' +
       '用户：明天下午两点半上英语课\n' +
       '输出：{"intent":"add","date":"明天","start":"14:30","end":"15:30","title":"英语课"}\n' +
@@ -634,13 +668,24 @@
       '输出：{"intent":"delete","date":"明天","title":"英语课"}\n' +
       '用户：我今天忙不忙\n' +
       '输出：{"intent":"query","date":"今天"}\n' +
+      '用户：后天12点后还有什么安排\n' +
+      '输出：{"intent":"query","date":"后天","after":"12:00"}\n' +
+      '用户：明天下午有什么安排\n' +
+      '输出：{"intent":"query","date":"明天","after":"12:00","before":"18:00"}\n' +
+      '用户：英语课什么时候\n' +
+      '输出：{"intent":"query","title":"英语课"}\n' +
+      '用户：英语课还有多久\n' +
+      '输出：{"intent":"query","title":"英语课","eta":true}\n' +
+      '用户：下一项安排是什么\n' +
+      '输出：{"intent":"query","next":true}\n' +
       '用户：把明天的安排复制到周五\n' +
       '输出：{"intent":"copy","from":"明天","to":"本周五"}\n' +
       '用户：你好呀\n' +
       '输出：{"intent":"chat"}';
   }
 
-  /* 今/明两天的安排清单，宠物靠它回答「我今天还有什么安排」这类问题 */
+  /* 今起三天的安排清单，宠物靠它回答「我今天还有什么安排」这类问题。
+     带三天是为了让「后天 12 点后呢」也能从上下文里查到 */
   function scheduleContext() {
     var days = [], total = 0;
     var today = App.Clock.today();
@@ -666,7 +711,8 @@
     if (active) {
       head += '正在进行：' + active.title + '（' + active.startTime + '-' + active.endTime + '）。\n';
     }
-    return head + '接下来两天的安排：\n' + days.join('\n');
+    var spanLabel = App.Config.llm.contextTaskDays >= 3 ? '接下来三天' : '接下来两天';
+    return head + spanLabel + '的安排：\n' + days.join('\n');
   }
 
   /* 闲聊的系统提示。事实全在 scheduleContext 里，模型只负责组织成人话。

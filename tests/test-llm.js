@@ -245,6 +245,23 @@ r = N({ intent: 'query', date: '今天' });
 eq('query scope=date', r.query.scope, 'date');
 eq('query 无日期 -> 今天/today', N({ intent: 'query' }).query.scope, 'today');
 
+r = N({ intent: 'query', date: '后天', after: '12:00' });
+eq('query after -> fromMin + 窗口文案',
+  [r.query.scope, r.query.fromMin, r.query.toMin, r.query.windowLabel, r.query.remainingOnly].join('|'),
+  ['date', '720', '', '12:00 后', 'true'].join('|'));
+r = N({ intent: 'query', before: '18:00' });
+eq('query before -> toMin，默认保留历史',
+  [r.query.fromMin, r.query.toMin, r.query.windowLabel, r.query.remainingOnly].join('|'),
+  ['', '1080', '18:00 前', 'false'].join('|'));
+r = N({ intent: 'query', title: '英语课', category: '学习' });
+eq('query 标题片段 + 类别',
+  [r.query.titleFrag, r.query.category].join('|'), ['英语课', 'studying'].join('|'));
+r = N({ intent: 'query', title: '英语课', next: true });
+eq('query next -> 只要一条且只看剩余',
+  [r.query.next, r.query.limit, r.query.remainingOnly].join('|'), ['true', '1', 'true'].join('|'));
+r = N({ intent: 'query', title: '英语课', eta: true });
+eq('query eta -> askEta', r.query.askEta, true);
+
 r = N({ intent: 'copy', from: '明天', to: '本周五' });
 eq('copy from/to', [r.date, r.targetDate].join('|'), [TODAY, TOMORROW].join('|'));
 eq('copy 缺 to -> null', N({ intent: 'copy', from: '明天' }), null);
@@ -452,7 +469,7 @@ console.log('\n=== 7. healthCheck：探活永不 throw ===');
   eq('JSON 能解回原话（schema 形式与 REPLY_SCHEMA 一致）',
     (function () { try { return JSON.parse(lastAsst).reply; } catch (e) { return '坏 JSON：' + lastAsst; } })(),
     '今天还有一节背单词哦');
-  eq('聊天系统提示带上了日程上下文', /接下来两天的安排/.test(LLM.chatSystem()), true);
+  eq('聊天系统提示带上了日程上下文', /接下来三天的安排/.test(LLM.chatSystem()), true);
   eq('聊天走的是 schema 约束（format 字段在）',
     JSON.parse(net.calls[net.calls.length - 1].body).format.required[0], 'reply');
 

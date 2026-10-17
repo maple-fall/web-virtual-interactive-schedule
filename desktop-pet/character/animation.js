@@ -1,7 +1,8 @@
 /*
- * character/animation.js — 角色动画：videos/<state>.webm 优先（VP9 透明通道），
- * 依次回退 .mp4 -> 内置 SVG 小猫
- * 对外：init(stageEl) / preload(forceSvg) / play(baseState) / playTemp(state, ms, opts) -> Promise
+ * character/animation.js — 角色动画：形象包（IndexedDB 里的 blob）优先，
+ * 其次 videos/<state>.webm（VP9 透明通道），依次回退 .mp4 -> 内置 SVG 小猫
+ * 对外：init(stageEl) / preload(forceSvg) / setCharacter(pack|null) /
+ *       play(baseState) / playTemp(state, ms, opts) -> Promise
  */
 (function () {
   'use strict';
@@ -130,6 +131,13 @@
     _tempResolve: null,
     _videoOk: false,
     _missing: {},         // 素材缺失的状态 -> 用 idle 素材顶替
+    pack: null,           // 当前激活的形象包（null = 默认 videos/ 素材）
+    _packUrls: {},        // state -> blob URL（当前形象包）
+    _staleUrls: [],       // 上一批 blob URL，等下一次切换再撤销
+    _probeEl: null,
+    _probeTimer: null,
+    _probeSeq: 0,
+    _pageHideBound: false,
 
     init: function (stageEl) {
       this.stage = stageEl;
@@ -147,17 +155,51 @@
         if (!self._videoOk) self.fallbackToSvg();
       });
 
+      // 页面关闭/刷新时统一释放 blob URL
+      if (!this._pageHideBound) {
+        this._pageHideBound = true;
+        window.addEventListener('pagehide', function () { self._revokeAll(); });
+      }
+
       this.applyState('idle');
     },
 
-    /* 该状态的素材地址；缺失的状态退用 idle 素材 */
+    /* 该状态的素材地址；缺失的状态退用 idle 素材。
+       形象包激活时优先用包内 blob：包内该状态 -> 包内 idle -> 磁盘 idle -> null */
     _srcFor: function (state) {
       var use = (state !== 'idle' && this._missing[state]) ? 'idle' : state;
-      return 'videos/' + use + this.ext;
+      if (this.pack) {
+        if (this._packUrls[use]) return this._packUrls[use];
+        if (this._packUrls.idle) return this._packUrls.idle;
+        return this.ext ? 'videos/idle' + this.ext : null;
+      }
+      return this.ext ? 'videos/' + use + this.ext : null;
     },
 
-    /* 播放某状态素材失败：先用 idle 素材顶上，idle 也失败才切 SVG */
+    /* 播放某状态素材失败：先用 idle 素材顶上，idle 也失败才切 SVG。
+       形象包里的 blob 坏了：丢掉 URL，有磁盘素材就退回磁盘 idle，否则 SVG */
     onVideoError: function () {
+      if (this.pack) {
+        var bad = this._packUrls[this.current] || this._packUrls.idle;
+        if (bad) {
+          this._revokeUrl(bad);
+          for (var k in this._packUrls) {
+            if (Object.prototype.hasOwnProperty.call(this._packUrls, k) &&
+                this._packUrls[k] === bad) {
+              this._packUrls[k] = null;
+            }
+          }
+        }
+        this.pack = null;
+        this._missing = {};
+        if (this.ext !== null) {
+          console.info('[Animation] 形象包素材无法播放，已退回 videos/idle' + this.ext);
+          this._setSrc('videos/idle' + this.ext);
+        } else {
+          this.fallbackToSvg();
+        }
+        return;
+      }
       if (this.ext === null) return;                     // 还在探测阶段，交给 preload
       var st = this.current;
       if (st !== 'idle' && !this._missing[st]) {
@@ -180,12 +222,14 @@
 
     /* 依次探测 idle.webm / idle.mp4；都不可用则切 SVG */
     preload: function (forceSvg) {
+      this.forced = !!forceSvg;
       if (forceSvg) { this.fallbackToSvg(); return; }
       this._probe(0);
     },
 
     _probe: function (idx) {
       var self = this;
+      var token = ++this._probeSeq;
       if (idx >= EXTS.length) { this.fallbackToSvg(); return; }
 
       var ext = EXTS[idx];
@@ -194,16 +238,20 @@
       var finished = false;      // 已经成功切到视频
 
       function ok() {
-        if (finished) return;
+        if (finished || token !== self._probeSeq) return;
         finished = true;
         clearTimeout(timer);
+        self._probeTimer = null;
+        if (self._probeEl === probe) self._probeEl = null;
         self.ext = ext;
         self.useVideo();
       }
       function fail() {
-        if (finished) return;
+        if (finished || token !== self._probeSeq) return;
         finished = true;
         clearTimeout(timer);
+        self._probeTimer = null;
+        if (self._probeEl === probe) self._probeEl = null;
         probe.removeAttribute('src');
         self._probe(idx + 1);
       }
@@ -218,28 +266,45 @@
       // 先降级到 SVG 保证页面可用，但监听器故意保留：文件真读出来时 ok 仍会触发，
       // 自动切回视频。真正的「文件不存在」会走 error，fail() 立刻换下一个格式。
       timer = setTimeout(function () {
-        if (finished) return;
+        if (finished || token !== self._probeSeq) return;
+        self._probeTimer = null;
         probe.__slow = true;
         console.info('[Animation] videos/idle' + ext + ' 加载偏慢，先用内置 SVG 顶上；' +
           '加载完成后会自动切换');
         self.fallbackToSvg();
       }, PROBE_MS);
 
+      this._probeTimer = timer;
+      this._probeEl = probe;
       probe.muted = true;
       probe.preload = 'auto';
       probe.src = 'videos/idle' + ext;
     },
 
-    /* 探针成功：从 SVG（或尚未初始化）切到视频 */
+    _probeStop: function () {
+      this._probeSeq++;
+      if (this._probeTimer) {
+        clearTimeout(this._probeTimer);
+        this._probeTimer = null;
+      }
+      if (this._probeEl) {
+        try { this._probeEl.removeAttribute('src'); } catch (e) {}
+        this._probeEl = null;
+      }
+    },
+
+    /* 探针成功：从 SVG（或尚未初始化）切到视频。
+       即使已经在视频模式也要重播：ext 刚确定，之前可能还是形象包的 blob
+       或未探测时的空 src，必须按新的磁盘地址重算一遍 */
     useVideo: function () {
-      if (this.mode === 'video' && !this.video.hidden) return;
+      var wasVideo = this.mode === 'video' && this.video && !this.video.hidden;
       this.mode = 'video';
       this._videoOk = true;
       this.stage.dataset.mode = 'video';
       this.svgBox.hidden = true;
       this.video.hidden = false;
-      console.info('[Animation] 已启用视频素材 videos/*' + this.ext);
-      this.play(this.current);
+      if (!wasVideo) console.info('[Animation] 已启用视频素材 videos/*' + this.ext);
+      this._replayCurrent();
     },
 
     fallbackToSvg: function () {
@@ -279,6 +344,7 @@
       this.applyState(state);
       if (this.mode === 'video') {
         var src = this._srcFor(state);
+        if (!src) { this.fallbackToSvg(); return; }
         this.video.loop = true;
         if (this.video.getAttribute('src') !== src) this._setSrc(src);
         else {
@@ -317,18 +383,118 @@
 
         if (self.mode === 'video') {
           var src = self._srcFor(visual);
-          self.video.loop = loop;
-          if (self.video.getAttribute('src') !== src) self._setSrc(src);
-          else {
-            try { self.video.currentTime = 0; } catch (e) {}
-            var p = self.video.play();
-            if (p && p.catch) p.catch(function () {});
+          if (!src) {
+            self.fallbackToSvg();
+          } else {
+            self.video.loop = loop;
+            if (self.video.getAttribute('src') !== src) self._setSrc(src);
+            else {
+              try { self.video.currentTime = 0; } catch (e) {}
+              var p = self.video.play();
+              if (p && p.catch) p.catch(function () {});
+            }
+            // 循环播放时 ended 不会触发（浏览器自己回到开头），不必挂监听
+            if (!loop) self.video.addEventListener('ended', finish, { once: true });
           }
-          // 循环播放时 ended 不会触发（浏览器自己回到开头），不必挂监听
-          if (!loop) self.video.addEventListener('ended', finish, { once: true });
         }
         self._tempTimer = setTimeout(finish, wait);
       });
+    },
+
+    /* 切换形象包；pack=null 表示回到 videos/ 默认素材。
+       旧 blob URL 先进 _staleUrls，下一次切换才撤销（正在播的帧不会立刻黑掉） */
+    setCharacter: function (pack) {
+      this._revokeStale();
+
+      var old = this._packUrls;
+      for (var k in old) {
+        if (Object.prototype.hasOwnProperty.call(old, k) && old[k]) {
+          this._staleUrls.push(old[k]);
+        }
+      }
+      this._packUrls = {};
+      this.pack = pack || null;
+      this._missing = {};
+
+      if (this.pack && this.pack.files) {
+        for (var state in this.pack.files) {
+          if (!Object.prototype.hasOwnProperty.call(this.pack.files, state)) continue;
+          var f = this.pack.files[state];
+          if (f && f.blob) {
+            try { this._packUrls[state] = URL.createObjectURL(f.blob); } catch (e) {}
+          } else if (f && f.url) {
+            // 内置形象：直接引用 videos/ 下的文件，不需要 blob URL
+            this._packUrls[state] = f.url;
+          }
+        }
+      }
+
+      var canVideo = (this._packUrls.idle || this.ext !== null) && !this.forced;
+      if (canVideo) {
+        this.mode = 'video';
+        this._videoOk = true;
+        if (this.stage) this.stage.dataset.mode = 'video';
+        if (this.svgBox) this.svgBox.hidden = true;
+        if (this.video) this.video.hidden = false;
+        console.info(this.pack
+          ? (this.pack.builtin
+            ? '[Animation] 已切换到内置形象「' + this.pack.name + '」'
+            : '[Animation] 已切换到形象包「' + this.pack.name + '」')
+          : '[Animation] 已切回默认形象 videos/*');
+      }
+
+      // 包内有 idle 就不必再探测磁盘素材；回默认形象则停掉旧探测
+      if (this._packUrls.idle || !this.pack) this._probeStop();
+
+      // 回默认形象但磁盘格式还没探过：先探测，成功后再由 useVideo 重播。
+      // 此时不能立刻 _replayCurrent()——this.ext 为 null 会拼出 videos/idlenull
+      if (!this.forced && !this.pack && this.ext === null) {
+        this.preload();
+        return;
+      }
+      // 当前包缺 idle 且磁盘格式未知：靠 preload 确定 ext 兜底
+      if (!this.forced && this.ext === null && !this._packUrls.idle) {
+        this.preload();
+      }
+
+      this._replayCurrent();
+    },
+
+    /* 切换后重播当前状态：临时态正在计时就只换 src，不打断计时 */
+    _replayCurrent: function () {
+      if (this.mode !== 'video') return;
+      if (this._tempResolve) {
+        var src = this._srcFor(this.current);
+        if (src) this._setSrc(src);
+        return;
+      }
+      this.play(this.current);
+    },
+
+    /* 只撤销 blob URL；内置形象用的是普通相对路径，revokeObjectURL 对它无意义 */
+    _revokeUrl: function (url) {
+      if (typeof url === 'string' && url.indexOf('blob:') === 0) {
+        try { URL.revokeObjectURL(url); } catch (e) {}
+      }
+    },
+
+    _revokeStale: function () {
+      var list = this._staleUrls;
+      this._staleUrls = [];
+      for (var i = 0; i < list.length; i++) {
+        this._revokeUrl(list[i]);
+      }
+    },
+
+    _revokeAll: function () {
+      var urls = this._packUrls;
+      this._packUrls = {};
+      this._revokeStale();
+      for (var k in urls) {
+        if (Object.prototype.hasOwnProperty.call(urls, k) && urls[k]) {
+          this._revokeUrl(urls[k]);
+        }
+      }
     },
 
     /* 提前结束当前临时态（任务被删/改走时用），Promise 会立即 resolve */
@@ -343,7 +509,11 @@
       this._tempResolve = null;
     },
 
-    destroy: function () { this.clearTempTimer(); }
+    destroy: function () {
+      this.clearTempTimer();
+      this._probeStop();
+      this._revokeAll();
+    }
   };
 
   App.Animation = Animation;

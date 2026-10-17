@@ -25,3 +25,10 @@ tools/_shot/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 视频处理：本地 ffmpeg 二进制（约 84MB）、Python 缓存、中间帧、素材备份、处理输出
+tools/video/ffmpeg.exe
+tools/video/__pycache__/
+.video-work/
+new_video/processed/
+desktop-pet/videos/_backup_*/

@@ -189,6 +189,177 @@
     return null;
   }
 
+  /* ---------------- 查询：时段窗口 / 指定事项 ----------------
+     查询和新增共用 findDate / findTime，但语义不同：
+     - 「12:00 后」「12:00 前」「14:00–16:00」是筛选窗口，不是任务时间
+     - 「英语课什么时候」里的「英语课」是要查的标题片段
+     窗口统一用「当天 0 点起的分钟数」表示，跨天由任务自己的 endOffset 处理 */
+
+  var PERIOD_WINDOW = {
+    '凌晨': { label: '凌晨', from: 0, to: 360 },
+    '早上': { label: '早上', from: 360, to: 540 },
+    '早晨': { label: '早上', from: 360, to: 540 },
+    '清晨': { label: '早上', from: 360, to: 540 },
+    '上午': { label: '上午', from: 360, to: 720 },
+    '中午': { label: '中午', from: 660, to: 840 },
+    '下午': { label: '下午', from: 720, to: 1080 },
+    '傍晚': { label: '傍晚', from: 1020, to: 1140 },
+    '晚上': { label: '晚上', from: 1080, to: 1440 },
+    '夜里': { label: '晚上', from: 1080, to: 1440 },
+    '夜晚': { label: '晚上', from: 1080, to: 1440 },
+    '今晚': { label: '晚上', from: 1080, to: 1440 },
+    '明晚': { label: '晚上', from: 1080, to: 1440 },
+    '后晚': { label: '晚上', from: 1080, to: 1440 }
+  };
+
+  /* 强标记：出现就基本可以断定是查询。弱标记只收「的安排 / 明天的日程」这类
+     名词结构，避免「帮我安排明天下午开会」被误判成查询。 */
+  var QUERY_STRONG_RE = /(还有什么|还有啥|还有几|剩(?:下|余)|有什么|有啥|有哪些|什么安排|啥安排|哪些安排|安排是(?:什么|啥)|安排表|日程表|日程列表|列表|查一下|查查|查看|看一下|看看|告诉我|显示|几点|什么时候|啥时候|多久|多长时间|哪天|哪一天|星期几|下一项|下一个|下一次|接下来|最近(?:的)?(?:安排|日程|任务)|忙不忙|有空|空闲|有没有安排|有无安排)/;
+  var QUERY_WEAK_RE = /(?:的(?:安排|日程|计划|行程)|(?:安排|日程|计划|行程)(?:呢|吗|是什么|有哪些|有吗)|(?:今天|明天|后天|大后天|周[一二三四五六日天]|下周[一二三四五六日天])\s*的?\s*(?:安排|日程|计划|行程)(?:呢|吗|？|\?)?$)/;
+  /* 「12点后」「下午3点前」单独成句时没有疑问词，也要认成查询；
+     「12点以后开会」结尾还有动作词，交给新增分支 */
+  var QUERY_TAIL_RE = /(?:以后|之后|以前|之前|后|前)\s*(?:呢|吗|啊|呀|？|\?)?\s*$/;
+
+  /* 查询句里只用于提问、不该进标题片段的词 */
+  var QUERY_NOISE = [
+    /^(?:帮我|给我|请|麻烦你?|我想知道|我想问一下|我想问|问一下|请问|查一下|查查|查看|看一下|看看|告诉我|显示一下?|查|我的)+/,
+    /(?:距离|还有|还剩|剩下|剩余|有哪些|有什么|有啥|什么时候|啥时候|什么|哪些|几项|几点|哪个|哪一天|哪天|星期几|多久|多长时间|接下来|下一项|下一个|下一次|最近|忙不忙|有空|空闲|有没有安排|有无安排|安排表|日程表|日程列表|列表|安排|日程|计划|行程|吗|呢|啊|呀|吧)+/g
+  ];
+
+  function isQuery(text) {
+    return QUERY_STRONG_RE.test(text) ||
+      QUERY_WEAK_RE.test(text) ||
+      QUERY_TAIL_RE.test(text);
+  }
+
+  function cleanQueryTitle(raw) {
+    var t = String(raw || '');
+    for (var i = 0; i < QUERY_NOISE.length; i++) t = t.replace(QUERY_NOISE[i], ' ');
+    t = cleanTitle(t);
+    // 「英语课是几点」抠掉「几点」后还剩一个「是」，cleanTitle 的边缘词表里没有它
+    var prev;
+    do {
+      prev = t;
+      t = t.replace(/^(?:是|的|在)+|(?:是|的|在)+$/, '');
+    } while (t !== prev);
+    return t.trim();
+  }
+
+  /* 解析查询的时间和日期，返回 { date, spans, fromMin, toMin, windowLabel }
+     fromMin / toMin 是当天 0 点起的分钟数，null 表示这一侧不设限 */
+  function parseQueryWindow(text, today, nowMs) {
+    var d = findDate(text, today);
+    var spans = [d];
+    var t1 = findTime(text);
+    var fromMin = null, toMin = null, windowLabel = null;
+
+    if (t1) {
+      spans.push(t1);
+      var startMin = t1.h * 60 + t1.m;
+      var tail = text.slice(t1.end);
+
+      // 「14:00 到 16:00」区间：终点继承起点时段，和新增的规则保持一致
+      var sep = /^\s*(?:到|至|~|～|-|—)\s*/.exec(tail);
+      var t2 = sep ? findTime(text, t1.end + sep[0].length) : null;
+      if (t2) {
+        var endH = t2.h;
+        if (!t2.period && t1.period) {
+          var inh = applyPeriod(t2.h, t1.period);
+          if (inh && inh.h * 60 + t2.m > startMin) endH = inh.h;
+        }
+        fromMin = startMin;
+        toMin = endH * 60 + t2.m;
+        windowLabel = util.minToHm(fromMin) + '–' + util.minToHm(toMin);
+        spans.push({ start: t1.end, end: t2.start });
+        spans.push(t2);
+      } else {
+        var afterM = /^\s*(?:以后|之后|过后|往后|后)/.exec(tail);
+        var beforeM = /^\s*(?:以前|之前|前)/.exec(tail);
+        if (afterM) {
+          fromMin = startMin;
+          windowLabel = util.minToHm(fromMin) + ' 后';
+          spans.push({ start: t1.end, end: t1.end + afterM[0].length });
+        } else if (beforeM) {
+          toMin = startMin;
+          windowLabel = util.minToHm(toMin) + ' 前';
+          spans.push({ start: t1.end, end: t1.end + beforeM[0].length });
+        } else {
+          // 只给一个钟点：按「从这时起」查，避免把整天的安排都算进来
+          fromMin = startMin;
+          windowLabel = util.minToHm(fromMin) + ' 起';
+        }
+      }
+    } else {
+      // 没给具体钟点，但给了「上午 / 下午 / 晚上」这类时段
+      var pm = /(凌晨|早上|早晨|清晨|上午|中午|下午|傍晚|晚上|夜里|夜晚|今晚|明晚|后晚)/.exec(text);
+      if (pm) {
+        var w = PERIOD_WINDOW[pm[1]];
+        fromMin = w.from;
+        toMin = w.to;
+        windowLabel = w.label;
+        spans.push({ start: pm.index, end: pm.index + pm[0].length });
+      }
+    }
+
+    // 「接下来 / 现在起」：从此刻算起
+    if (fromMin == null && toMin == null) {
+      var nm = /(接下来|从现在|现在起|现在开始|后面)/.exec(text);
+      if (nm) {
+        var now = new Date(nowMs);
+        fromMin = now.getHours() * 60 + now.getMinutes();
+        windowLabel = '现在起';
+        spans.push({ start: nm.index, end: nm.index + nm[0].length });
+      }
+    }
+
+    return { date: d, spans: spans, fromMin: fromMin, toMin: toMin, windowLabel: windowLabel };
+  }
+
+  function parseQuery(text, today, nowMs) {
+    var win = parseQueryWindow(text, today, nowMs);
+    var date = win.date ? win.date.date : today;
+    var t1 = findTime(text);
+    if (t1 && t1.nextDay && !win.date) date = util.addDaysStr(date, 1);
+
+    var catM = /(学习|工作|通用)(?:的)?(?:安排|日程|任务|计划)/.exec(text);
+    var category = catM
+      ? { '学习': 'studying', '工作': 'working', '通用': 'general' }[catM[1]]
+      : null;
+    var spans = win.spans.slice();
+    if (catM) spans.push({ start: catM.index, end: catM.index + catM[0].length });
+
+    var titleFrag = cleanQueryTitle(stripSpans(text, spans)) || null;
+    var askEta = /(还有多久|还有多长时间|还剩多久|还要多久)/.test(text);
+    var next = /(下一项|下一个|下一次|下一场)/.test(text);
+    var hasRemaining = /(还有|还剩|剩下|剩余|接下来|下一项|下一个|下一次|之后|以后|后面)/.test(text);
+    var hasWindow = win.fromMin != null || win.toMin != null;
+    // 明确给了窗口（「今天上午」「12 点前」）时默认把窗口内的历史也算上，
+    // 用户问的是那段时间发生了什么；带「还有 / 接下来」才只留剩余。
+    var remainingOnly = hasWindow ? hasRemaining : true;
+    if (askEta || next) remainingOnly = true;
+
+    return {
+      ok: true, intent: 'query',
+      date: date,
+      targetDate: date,
+      startTime: null, endTime: null, title: null,
+      category: null, target: null, patches: null,
+      query: {
+        scope: win.date ? 'date' : 'today',
+        remainingOnly: remainingOnly,
+        fromMin: win.fromMin,
+        toMin: win.toMin,
+        windowLabel: win.windowLabel,
+        titleFrag: titleFrag,
+        category: category,
+        askEta: askEta,
+        next: next,
+        limit: next ? 1 : null
+      },
+      defaultsUsed: []
+    };
+  }
+
   /* ---------------- 分类 ---------------- */
 
   function classify(text) {
@@ -244,7 +415,6 @@
   /* ---------------- 意图识别 ---------------- */
 
   var DELETE_RE = /(取消|删掉|删除|删了|去掉|移除|不要了|别再|不用了)/;
-  var QUERY_RE = /(还有什么|有什么安排|什么安排|有什么|有哪些|有哪些安排|日程列表|安排表|列表|安排是|^看看|查一下|看一下|今天安排|明天安排)/;
   var UPDATE_SPLIT_RE = /(改成|改到|改为|换成|换到|挪到|调整到|调整成|调整|改成)/;
   var UPDATE_RE = /(改|挪|调整|换)/;
   var ADD_RE = /(加|添加|新增|新建|安排|提醒我|要上|有个|预约|订|记一下|记录)/;
@@ -258,7 +428,7 @@
     add: ['明天下午两点半上英语课', '晚上七点有个会议', '后天9点到11点数学复习'],
     delete: ['取消明天的英语课', '把三点的会议删掉'],
     update: ['把下午三点的会议改成四点', '英语课挪到周五'],
-    query: ['今天还有什么安排', '明天有什么'],
+    query: ['今天还有什么安排', '后天12:00后还有什么安排', '明天下午的安排', '英语课什么时候'],
     copy: ['把明天的安排复制到周五', '把9月20日的安排复制到9月25日'],
     idle: ['我想玩游戏', '明天下午两点半上英语课', '今天还有什么安排']
   };
@@ -463,17 +633,8 @@
       }
 
       /* --- 3. 查询 --- */
-      if (QUERY_RE.test(text)) {
-        var qDate = findDate(text, today);
-        return {
-          ok: true, intent: 'query',
-          date: qDate ? qDate.date : today,
-          targetDate: qDate ? qDate.date : today,
-          startTime: null, endTime: null, title: null,
-          category: null, target: null, patches: null,
-          query: { scope: qDate ? 'date' : 'today', remainingOnly: true },
-          defaultsUsed: []
-        };
+      if (isQuery(text)) {
+        return parseQuery(text, today, (ctx && ctx.now) || App.Clock.now());
       }
 
       /* --- 4. 修改（无「把」）：英语课挪到周五 --- */

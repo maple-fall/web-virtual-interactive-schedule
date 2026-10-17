@@ -21,14 +21,18 @@
       <button id="btn-bg-clear" class="btn btn-ghost" hidden>清除背景</button>
       <button id="btn-wallpaper" class="btn btn-ghost">界面壁纸</button>
       <button id="btn-wallpaper-clear" class="btn btn-ghost" hidden>清除壁纸</button>
+      <button type="button" id="btn-char" class="btn btn-ghost">更换形象</button>
       <button type="button" id="btn-llm" class="btn btn-ghost" aria-pressed="false">本地模型：关</button>
       <button type="button" id="btn-llm-config" class="btn btn-ghost" title="本地模型设置">⚙</button>
       <input type="file" id="file-csv" accept=".csv,.pdf,text/csv,application/pdf" hidden>
       <input type="file" id="file-backup" accept=".json,application/json" hidden>
       <input type="file" id="file-wallpaper" accept="image/*" hidden>
+      <input type="file" id="file-character" accept=".zip,application/zip" hidden>
     </div>
     <div id="bg-picker" class="bg-picker" hidden></div>
     <div id="wallpaper-picker" class="bg-picker" hidden></div>
+    <!-- 形象包：zip 在页面内解析，存 IndexedDB，不写 videos/ 目录 -->
+    <div id="char-picker" class="bg-picker char-panel" hidden></div>
     <!-- 本地模型设置：地址限本机/局域网；开关关闭时应用不产生任何网络请求 -->
     <div id="llm-picker" class="bg-picker llm-panel" hidden>
       <span class="bg-picker-tip">本地模型（Ollama）：</span>
@@ -89,6 +93,9 @@
 
 <!-- 普通 script 按依赖顺序加载，双击 index.html（file://）即可运行 -->
 <script src="app.js"></script>
+<script src="character/packZip.js"></script>
+<script src="character/packStore.js"></script>
+<script src="character/builtin.js"></script>
 <script src="schedule/scheduleTemplate.js"></script>
 <script src="settings.js"></script>
 <script src="pip.js"></script>

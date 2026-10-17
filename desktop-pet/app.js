@@ -172,7 +172,7 @@
       intentMaxTokens: 256,
       chatMaxTokens: 512,
       historyTurns: 12,          // 只在内存里保留的对话轮数
-      contextTaskDays: 2,        // 系统提示里带几天的安排（今天+明天）
+      contextTaskDays: 3,        // 系统提示里带几天的安排（今天+明天+后天）
       contextMaxTasks: 30        // 系统提示里最多列几条任务
     },
     keywords: {
@@ -735,33 +735,151 @@
         { mood: 'happy', ms: 4500 });
     },
 
-    /* ---- 查询 ---- */
+    /* ---- 查询 ----
+       支持三种问法，全部走同一条只读通路：
+       1. 按日期：今天 / 明天 / 后天 / 周五 / 具体日期
+       2. 按窗口：12:00 后、14:00 前的、明天下午、14:00–16:00
+       3. 按事项：英语课什么时候 / 英语课还有多久 / 下一项安排
+       query 里的字段：fromMin / toMin 是当天 0 点起的分钟数，titleFrag 是标题片段，
+       askEta 问剩余时间，next 只要下一项，limit 限制条数。 */
     doQuery: function (intent) {
-      var d = intent.date;
+      var q = intent.query || {};
+      var self = this;
       var now = App.Clock.now();
-      var tasks = App.Manager.tasksOfDate(d).filter(function (t) {
-        return !(intent.query.remainingOnly) || App.util.taskEndMs(t) > now;
+      var today = App.Clock.today();
+      var explicitDate = q.scope === 'date';
+      var baseDate = intent.date || today;
+      var titleFrag = q.titleFrag || null;
+      var multiDay = !!titleFrag && !explicitDate;
+
+      var pool;
+      // 「英语课什么时候」「下一项」这类跨天问题要在全库未来日程里找；
+      // 指定了日期就只在该日找。普通清单查询仍只看 baseDate 当天。
+      if (titleFrag || q.next || q.askEta) {
+        pool = App.Manager.all().filter(function (t) {
+          if (explicitDate) return t.date === baseDate;
+          return t.date >= today;
+        });
+      } else {
+        pool = App.Manager.tasksOfDate(baseDate);
+      }
+
+      function startMin(t) { return App.util.hmToMin(t.startTime); }
+      function endMin(t) {
+        return App.util.hmToMin(t.endTime) + (t.endOffset || 0) * 1440;
+      }
+      function norm(s) { return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ''); }
+
+      var tasks = pool.filter(function (t) {
+        if (q.category && t.category !== q.category) return false;
+        if (titleFrag) {
+          var title = norm(t.title), frag = norm(titleFrag);
+          if (title.indexOf(frag) < 0 && frag.indexOf(title) < 0) return false;
+        }
+        // 窗口按「时间上是否相交」判断：11:30–13:00 也算 12:00 后的安排
+        if (q.fromMin != null && endMin(t) <= q.fromMin) return false;
+        if (q.toMin != null && startMin(t) >= q.toMin) return false;
+        if (q.remainingOnly && App.util.taskEndMs(t) <= now) return false;
+        return true;
       }).sort(function (a, b) {
-        return a.startTime < b.startTime ? -1 : 1;
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return a.startTime < b.startTime ? -1 : a.startTime > b.startTime ? 1 : 0;
       });
 
-      var label = this.dateLabel(d);
-      if (!tasks.length) {
-        this.announce(label + (intent.query.remainingOnly ? '没有剩余安排了，好好休息吧～' : '没有安排。'),
-          { mood: 'idle', ms: 4000 });
+      if (q.limit && tasks.length > q.limit) tasks = tasks.slice(0, q.limit);
+
+      var label = this.dateLabel(baseDate);
+      var where = label;
+      if (q.windowLabel) {
+        // 「明天下午」「后天 12:00 后」：中文时段直接拼，带数字的窗口留个空格
+        where += /^[凌晨早上早晨清晨上午中午下午傍晚晚上]+$/.test(q.windowLabel)
+          ? q.windowLabel : ' ' + q.windowLabel;
+      }
+
+      /* 「英语课还有多久」「下一项安排」这类问的是时刻，先直接给一句话 */
+      if (q.askEta) {
+        var active = null, next = null;
+        for (var i = 0; i < tasks.length; i++) {
+          if (App.util.taskStartMs(tasks[i]) > now) { next = tasks[i]; break; }
+          if (App.util.taskEndMs(tasks[i]) > now) { active = tasks[i]; break; }
+        }
+        var what = titleFrag ? '「' + App.util.escapeHtml(titleFrag) + '」' : '下一项安排';
+        if (active) {
+          this.announce(what + '正在进行中（' + this.dateLabel(active.date) + ' ' +
+            this.timeRange(active) + '）。', { mood: 'idle', ms: 4500 });
+        } else if (next) {
+          this.announce('距离' + what + '还有 ' +
+            this.durationText(App.util.taskStartMs(next) - now) + '（' +
+            this.dateLabel(next.date) + ' ' + this.timeRange(next) + '）。',
+            { mood: 'idle', ms: 4500 });
+        } else {
+          this.announce('接下来没有' + (titleFrag ? '「' + App.util.escapeHtml(titleFrag) + '」的' : '') +
+            '安排了，好好休息吧～', { mood: 'idle', ms: 4000 });
+        }
+        App.bus.emit('query:highlight', {
+          ids: tasks.map(function (t) { return t.id; }), date: baseDate
+        });
         return;
       }
+
+      if (q.next) {
+        if (!tasks.length) {
+          this.announce('接下来没有' + (titleFrag ? '「' + App.util.escapeHtml(titleFrag) + '」的' : '') +
+            '安排了，好好休息吧～', { mood: 'idle', ms: 4000 });
+          return;
+        }
+        var n = tasks[0];
+        this.announce('下一项' + (titleFrag ? '「' + App.util.escapeHtml(titleFrag) + '」' : '安排') +
+          '是 ' + this.dateLabel(n.date) + ' ' + this.timeRange(n) + '。',
+          { mood: 'idle', ms: 4500 });
+        App.bus.emit('query:highlight', { ids: [n.id], date: n.date });
+        return;
+      }
+
+      if (!tasks.length) {
+        var empty = titleFrag
+          ? '没有找到「' + App.util.escapeHtml(titleFrag) + '」的安排。'
+          : where + (q.remainingOnly ? '没有剩余安排了，好好休息吧～' : '没有安排。');
+        this.announce(empty, { mood: 'idle', ms: 4000 });
+        return;
+      }
+
       var rows = tasks.map(function (t) {
         var state = App.util.taskEndMs(t) <= now ? '已完成' :
           (App.util.taskStartMs(t) <= now ? '进行中' : '待完成');
-        return '<li><span class="q-time">' + t.startTime + '–' + t.endTime + '</span>' +
+        var day = multiDay
+          ? '<span class="q-date">' + self.dateLabel(t.date) + '</span>' : '';
+        var end = (t.endOffset ? '次日 ' : '') + t.endTime;
+        return '<li>' + day + '<span class="q-time">' + t.startTime + '–' + end + '</span>' +
           '<span class="q-title">' + App.util.escapeHtml(t.title) + '</span>' +
           '<span class="q-state q-' + state + '">' + state + '</span></li>';
       }).join('');
-      App.Output.pet(label + '有 ' + tasks.length + ' 项安排：<ul class="query-list">' + rows + '</ul>',
-        { mood: 'idle' });
-      App.Bubble.say(label + '有 ' + tasks.length + ' 项安排，看右边计划表哦', { ms: 4000 });
-      App.bus.emit('query:highlight', { ids: tasks.map(function (t) { return t.id; }), date: d });
+
+      var head = titleFrag
+        ? (multiDay ? '' : where) + '找到 ' + tasks.length + ' 项「' +
+          App.util.escapeHtml(titleFrag) + '」：'
+        : where + '有 ' + tasks.length + ' 项安排：';
+      App.Output.pet(head + '<ul class="query-list">' + rows + '</ul>', { mood: 'idle' });
+      App.Bubble.say(titleFrag
+        ? '找到 ' + tasks.length + ' 项安排，看计划表哦'
+        : where + '有 ' + tasks.length + ' 项安排，看计划表哦', { ms: 4000 });
+      App.bus.emit('query:highlight', {
+        ids: tasks.map(function (t) { return t.id; }), date: baseDate
+      });
+    },
+
+    /* 毫秒 -> 「2 天 3 小时」「15 分钟」；用于「还有多久」 */
+    durationText: function (ms) {
+      var min = Math.max(0, Math.round(ms / 60000));
+      if (min < 1) return '不到 1 分钟';
+      var d = Math.floor(min / 1440);
+      var h = Math.floor((min % 1440) / 60);
+      var m = min % 60;
+      var parts = [];
+      if (d) parts.push(d + ' 天');
+      if (h) parts.push(h + ' 小时');
+      if (m && !d) parts.push(m + ' 分钟');
+      return parts.join(' ') || '不到 1 分钟';
     },
 
     listCandidates: function (candidates, lead) {
@@ -1135,6 +1253,8 @@
     App.Controller.bindEvents();
     App.Controller.bindUI();
     App.Settings.init();   // 需在 Bubble / Output 之后，提示信息才能正常显示
+    // 上次选过形象包就异步恢复；默认形象立即返回，不影响启动时序
+    if (App.Settings.restoreCharacter) App.Settings.restoreCharacter();
     // 本地模型：仅在开关打开时才会发探活请求，关闭时静默（见 dialog/llm.js）
     if (App.LLM) App.LLM.init(App.Settings.llm);
     App.Pip.init();        // 依赖 Settings.bg 与 Animation

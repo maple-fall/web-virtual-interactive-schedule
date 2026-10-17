@@ -36,7 +36,7 @@
 
 想直接看完整效果，打开 `index.html?demo=1`，会自动灌入几条演示日程（含一条"正在进行中"的任务），宠物立刻进入工作/学习状态。
 
-> **如果看到的是橙色小猫而不是紫发角色**，说明视频素材没加载上、自动降级到了内置 SVG 动画。功能完全不受影响，六个状态一样能切换。原因和解决办法见 [第十二节](#为什么我看到的是一只橙色小猫)。
+> **如果看到的是橙色小猫而不是紫发角色**，说明视频素材没加载上、自动降级到了内置 SVG 动画。功能完全不受影响，七种状态一样能切换。原因和解决办法见 [第十二节](#为什么我看到的是一只橙色小猫)。
 
 > **想在手机或平板上用？** 见 [第十六节](#十六移动端使用)。
 
@@ -242,6 +242,15 @@ date,start,end,title,category
 | --- | --- |
 | `今天还有什么安排` | 列出今天剩余日程，并在右侧计划表高亮 |
 | `明天有什么` | 列出明天的日程 |
+| `后天12:00后还有什么安排` | 只看某个时刻之后的安排（跨过 12:00 的任务也算） |
+| `今天12点前的安排` | 只看某个时刻之前的安排 |
+| `明天下午的安排` | 按上午 / 中午 / 下午 / 晚上这类时段筛选 |
+| `今天上午有什么安排` | 按上午时段筛选；明确问了时段时，已经结束的安排也会列出来 |
+| `明天14:00到16:00的安排` | 按明确的时间区间筛选 |
+| `接下来还有什么安排` | 从此刻起列出剩余安排 |
+| `英语课什么时候` | 在所有未来日程里找这个事项，列出每一次 |
+| `英语课还有多久` | 直接回答距离下一次还有多长时间；正在进行就说正在进行 |
+| `下一项安排是什么` | 直接说出最近的一条安排 |
 
 ### 复制整天（把某天的安排整批搬到另一天）
 
@@ -322,11 +331,12 @@ date,start,end,title,category
 
 | 模式 | 长什么样 | 怎么触发 |
 | --- | --- | --- |
-| `video` | 紫发少女（默认素材） | `videos/` 下有能播的视频素材 |
+| `video` | 内置形象 zhenzhu（默认），或导入的形象包 | 内置目录 / 包内有能播的视频素材 |
 | `svg` | 橙色小猫 + CSS 动画 | 视频素材缺失、加载失败，或加了 `?novideo=1` |
 
-启动时会试播 `videos/idle.webm`（超时 5 秒），能播就用视频，否则自动降级到内置 SVG 小猫，
-不需要手动切换。当前用的是哪套，按 `F12` 在控制台输入：
+启动时会先探测 `videos/idle.webm` 作为兜底素材（根目录没有就继续），随后恢复上次选择——默认是
+内置形象 zhenzhu，直接读 `videos/zhenzhu/`；都不可用时自动降级到内置 SVG 小猫，不需要手动切换。
+当前用的是哪套，按 `F12` 在控制台输入：
 
 ```js
 document.getElementById('stage').dataset.mode      // 'video' 或 'svg'
@@ -341,17 +351,17 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 
 | 状态 | 徽章 | 触发条件 | 角色表现 | 素材文件 |
 | --- | --- | --- | --- | --- |
-| `idle` | 空闲中 | 当前没有进行中的任务 | 站立、轻微呼吸摆动 | `idle.webm` |
-| `studying` | 学习中 | 正在进行「学习」类任务 | 坐在书桌前敲键盘 | `studying.webm` |
-| `working` | 工作中 | 正在进行「工作」/「通用」类任务 | 同上（书桌场景） | `working.webm` |
+| `idle` | 空闲中 | 当前没有进行中的任务 | 托腮侧卧、轻微呼吸摆动 | `idle.webm` |
+| `studying` | 学习中 | 正在进行「学习」类任务 | 坐在书桌前用笔写字 | `studying.webm` |
+| `working` | 工作中 | 正在进行「工作」/「通用」类任务 | 端着茶杯喝茶 | `working.webm` |
 
 **临时态**（播完一轮回到基础态）：
 
 | 状态 | 徽章 | 触发条件 | 角色表现 | 素材文件 | 时长 |
 | --- | --- | --- | --- | --- | --- |
 | `alert` | 提醒 | 任务**刚开始**的 90 秒内 | 举手挥动 + 感叹号 + 气泡播报 | `alert.webm` | 5 秒 |
-| `done` | 任务完成 | 任务**刚结束**时 | 闭眼笑 + 飘心 + 完成播报 | `done.webm` | 3.5 秒 |
-| `refuse` | 温馨提醒 | 任务进行中你提出娱乐请求 | 抖动 + 红光 + 拒绝话术 | `refuse.webm` | 2.5 秒 |
+| `done` | 任务完成 | 任务**刚结束**时 | 闭眼笑、双手合拢 + 完成播报 | `done.webm` | 3.5 秒 |
+| `refuse` | 温馨提醒 | 任务进行中你提出娱乐请求 | 皱眉握拳 + 抖动 + 红光 + 拒绝话术 | `refuse.webm` | 2.5 秒 |
 | `talking` | 交流中 | 本地模型正在理解 / 组织回复 | 说话、讲解手势 | `talking.webm` | 循环到回复结束 |
 
 > `talking` 只在**开启本地大模型**（[第十八节](#十八本地大模型ollama)）后才会出现，且是唯一**循环播放**的临时态：
@@ -485,7 +495,9 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 
 点顶栏 **「画中画」**，宠物舞台会被搬进一个独立的悬浮小窗，可以拖到屏幕任意角落、置顶在其他窗口之上，主窗口该干嘛干嘛。
 
-搬过去的是**整个舞台**——背景、角色、头顶气泡、状态徽章全都在，跟主界面里一模一样。关闭小窗后舞台自动回到原位，视频播放不中断。
+搬过去的是**整个舞台**——背景、角色、头顶气泡、状态徽章全都在，跟主界面里一模一样。窗口下半部分还会带一条**紧凑计划栏**：列出今起三天内还没结束的安排（最多 5 条），正在进行的那条高亮，跨天的自动标上「明天 / 后天」。日程有增删改时它会立即刷新，时间流逝时每 30 秒更新一次。关闭小窗后舞台自动回到原位，视频播放不中断。
+
+**关于位置**：浏览器没有提供"把画中画窗口固定到右上角"的接口，首次打开的位置由浏览器决定（通常在屏幕右下）。直接用鼠标把小窗**拖到右上角**即可，Chrome / Edge 一般会记住上次的位置，下次打开就还在那里。
 
 **支持情况**：只有**桌面版** Chrome / Edge 116+ 和 Firefox 151+ 支持（用的是浏览器的 Document Picture-in-Picture API）。Safari、以及所有手机和平板浏览器都不支持——**不支持时按钮直接不显示**，不会点了没反应。
 
@@ -509,7 +521,7 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 **排查顺序：**
 
 1. **先按 `Ctrl+F5` 强制刷新**——如果你在素材生成之前就打开过页面，看到的是旧状态。
-2. 确认 `desktop-pet/videos/` 目录下确实有 7 个 `.webm` 文件（打开文件夹看一眼）。
+2. 确认 `desktop-pet/videos/zhenzhu/` 目录下确实有 7 个 `.webm` 文件（打开文件夹看一眼）。
 3. **确认你是在浏览器里打开的，不是 IDE 的预览窗口**。IDE 预览不是真正的 `file://` 页面，读不到同级的 `videos/` 目录，必然降级成猫。
 4. 想强制对比两种效果：加参数 `index.html?novideo=1` 会主动使用小猫。
 
@@ -539,7 +551,7 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 
 ### 怎么改"一个任务默认多长时间"之类的设置？
 
-打开 `desktop-pet/app.js`，顶部的 `App.Config`（约 132-178 行）集中了所有可调项：
+打开 `desktop-pet/app.js`，顶部的 `App.Config`（约 149-211 行）集中了所有可调项：
 
 | 配置 | 当前值 | 作用 |
 | --- | --- | --- |
@@ -551,7 +563,7 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 | `refusePhrases` | 见文件 | 两级拒绝话术（含 `{category}` / `{title}` 占位） |
 | `stateLabel` | 见文件 | 角色头顶徽章的文字。想改叫法改这里 |
 | `stateByCategory` | 见文件 | 任务类别 → 基础态。想让「通用」类任务也显示学习状态，把 `general` 改成 `'studying'` |
-| `tempMs` | `{alert:5000, done:3500, refuse:2500, warnStart:5000, warnEnd:4000}` | 各临时态的持续时间 |
+| `tempMs` | `{alert:5000, done:3500, refuse:2500, warnStart:5000, warnEnd:4000, talking:90000}` | 各临时态的持续时间（毫秒）；`talking` 只是兜底上限，正常由回复结束主动收掉 |
 | `startWindowSec` | `90` | 任务开始后多久内算"准点提醒" |
 | `warnStartMin` | `5` | 任务开始前几分钟提醒 |
 | `warnEndMin` | `10` | 任务结束前几分钟打气 |
@@ -614,16 +626,16 @@ var WALLPAPER_OVERLAY = 'linear-gradient(rgba(15,19,34,.35), rgba(15,19,34,.35))
 ```
 AIcompete/
 ├── desktop-pet/        ← 应用本体，自包含，双击 index.html 就能跑；零依赖、零构建
-├── plans/              两篇文档：本篇使用说明 + 开发记录（改动的原因与验证数据）
-├── tests/              11 个回归测试脚本 + run.js 总入口（不参与运行）
-├── tools/              模板 PDF / 内置 CMap 的生成器 + 排版预览工具（不参与运行）
+├── plans/              三篇文档：本篇使用说明 + 开发记录 + 修复与优化记录（问题索引与验证）
+├── tests/              13 个回归测试脚本 + fixtures + run.js 总入口（不参与运行）
+├── tools/              模板 PDF / CMap 生成器、视频处理与形象包工具（不参与运行）
 ├── package.json        dev-only：测试与生成命令的 npm 入口，desktop-pet/ 不需要它
+├── package-lock.json   npm install 生成的依赖锁文件
 ├── node_modules/       tools/ 与两个 PDF 测试的 dev 依赖，已被 .gitignore 排除
-├── .gitignore          排除 dev 依赖与测试临时产物
-└── claude_DesktopNotepad/   Claude Code 配置样例，与应用无关
+└── .gitignore          排除 dev 依赖与测试临时产物
 ```
 
-改完代码想验一下有没有弄坏东西，一条命令跑完全部 9 个离线套件（508 条断言，纯 Node，几秒出结果、不开浏览器）：
+改完代码想验一下有没有弄坏东西，一条命令跑完全部 11 个离线套件（647 条断言，纯 Node，几秒出结果、不开浏览器）：
 
 ```bash
 npm test
@@ -637,7 +649,9 @@ npm test
 ```bash
 node tests/test-parse-time.js        # 中文时间/日期解析
 node tests/test-copy-day.js          # 整日复制：冲突成对询问 + 重叠/更换两种收尾
-node tests/test-pip.js               # 画中画
+node tests/test-query.js             # 查询：时间窗口、指定事项、还有多久、下一项
+node tests/test-pip.js               # 画中画（含计划栏）
+node tests/test-character-pack.js    # 形象包：zip 解析/打包、IndexedDB 存取、切形象
 node tests/test-stage-background.js  # 舞台背景
 node tests/test-wallpaper.js         # 界面壁纸
 node tests/test-warn-reminders.js    # 提醒机制
@@ -668,7 +682,7 @@ desktop-pet/
 ├── index.html                     界面结构 + 按依赖顺序加载脚本
 ├── style.css                      深色主题 + 各状态 CSS 动画 + 壁纸半透明规则
 ├── app.js                         核心：Config / 事件总线 / 工具 / 时钟 / 计划表渲染 / 对话编排
-├── settings.js                    舞台背景 + 界面壁纸 + 本地模型开关的读写与设置面板
+├── settings.js                    舞台背景 + 界面壁纸 + 本地模型 + 虚拟形象（导入/切换/导出）
 ├── pip.js                         画中画（文档画中画 API，把舞台搬进独立小窗）
 ├── lib/pdfjs/                     vendored pdf.js 3.11.174（legacy 构建，PDF 文字层提取）
 │   ├── cmaps.js                   内置 GB 系 CMap（生成产物）：让未内嵌字体的中文 PDF 能提出文字
@@ -682,7 +696,10 @@ desktop-pet/
 │   │                              指向本地文件的 <a download> 会因跨源失效，只能内置后用 Blob 下载
 │   └── manager.js                 唯一数据源：增删改查、重叠检测、周期物化、当日总结标记
 ├── character/
-│   ├── animation.js               视频素材探测与降级、状态切换、临时态播放、SVG 造型
+│   ├── animation.js               形象包/视频素材探测与降级、状态切换、临时态播放、SVG 造型
+│   ├── builtin.js                 内置形象登记表（默认 zhenzhu，直接引用 videos/ 下的目录）
+│   ├── packZip.js                 形象包 zip 解析与打包（STORED/DEFLATE，无第三方库）
+│   ├── packStore.js               形象包的 IndexedDB 存储（DB desktop_pet_packs）
 │   └── stateMachine.js            时间驱动的状态推导、临时态队列、拒绝升级、提前提醒
 ├── dialog/
 │   ├── input.js                   中文自然语言解析（意图/日期/时间/时长/标题抽取）
@@ -695,7 +712,12 @@ desktop-pet/
 │   ├── 梁浩贤(2026-2027-1)课表.pdf  教务系统导出的网格课表样本（课表导入的测试用例）
 │   ├── backgrounds/bg1.jpg        舞台背景预设
 │   └── wallpapers/wall1.jpg       界面壁纸预设
-└── videos/                        角色动画素材 7 个 + 素材说明
+└── videos/                        角色动画素材
+    ├── zhenzhu/                   内置形象 zhenzhu 的 7 个 WebM（应用默认形象）
+    ├── zhenzhu.zip                zhenzhu 的 zip 版，可在「更换形象」里重新导入
+    ├── _backup_20261017.zip       旧版紫发少女素材的 zip 版，可作为第二个形象导入
+    ├── _backup_<日期>/            char_pack.py install 覆盖前才生成的自动备份（被 .gitignore 排除）
+    └── README.md                  素材规格与调试说明
 ```
 
 **没有构建步骤、不用装任何东西**（除 `lib/pdfjs/` 下 vendored 的 pdf.js 外没有第三方依赖）——
@@ -733,7 +755,7 @@ desktop-pet/
 | --- | --- | --- |
 | 日程管理、对话指令、PDF / CSV 导入 | ✅ | ✅ |
 | 课表 PDF 导入（教务系统网格课表） | ✅ | ✅ |
-| 宠物动画、六种状态 | ✅ | ✅ |
+| 宠物动画、七种状态 | ✅ | ✅ |
 | 舞台背景、界面壁纸 | ✅ | ✅ |
 | 开始前 / 结束前提醒 | ✅ | ✅（页面开着才响） |
 | **画中画** | ✅ 桌面 Chrome/Edge 116+、Firefox 151+ | ❌ 不支持 |
@@ -745,7 +767,7 @@ desktop-pet/
 - **Android**：必须额外装一个 **QuickEdit** 当启动器，光用 Edge / Chrome 打开是用不了功能的（[见下文](#android-手机--平板)）
 - **iPad / iPhone**：Files App 里点 HTML 读不到同目录的资源，要另想办法（[见下文](#ipad--iphone)）
 
-**唯一不能用的是画中画**——那是浏览器桌面端专有的 API（`documentPictureInPicture`），Safari 和所有手机浏览器都没有实现（Android 上的 Chrome 也没有）。项目已经做了处理：**不支持时「画中画」按钮自动隐藏**，不会出现点了没反应的情况（[pip.js:38](../desktop-pet/pip.js#L38)）。
+**唯一不能用的是画中画**——那是浏览器桌面端专有的 API（`documentPictureInPicture`），Safari 和所有手机浏览器都没有实现（Android 上的 Chrome 也没有）。项目已经做了处理：**不支持时「画中画」按钮自动隐藏**，不会出现点了没反应的情况（[pip.js:56](../desktop-pet/pip.js#L56)）。
 
 ### Windows 平板（Surface 这类）
 
@@ -825,7 +847,7 @@ App Store 里搜 **Koder**（或类似的代码编辑器 App，关键词 "local 
 
 ### 移动端通用注意事项
 
-**布局会自动适配**：屏幕宽度小于 900px 时，界面自动从「左舞台 + 右计划表」的双列切成上下单列（[style.css:693](../desktop-pet/style.css#L693)）。平板横屏（宽度通常 >900px）会保持桌面布局。
+**布局会自动适配**：屏幕宽度小于 900px 时，界面自动从「左舞台 + 右计划表」的双列切成上下单列（[style.css:921](../desktop-pet/style.css#L921)）。平板横屏（宽度通常 >900px）会保持桌面布局。
 
 **提醒只在页面开着时响**：这跟设备无关，是项目的设计——提醒靠页面内的定时器，**你把浏览器切到后台或锁屏，提醒就不会响**。手机上尤其容易发生（切个微信就没了）。要让它一直提醒，得把页面保持在前台，且关闭系统的省电限制。
 
@@ -843,203 +865,298 @@ App Store 里搜 **Koder**（或类似的代码编辑器 App，关键词 "local 
 
 ## 十七、虚拟形象自定义
 
-宠物的形象有两套（见[第六节](#六角色状态说明)）：**视频素材**（默认）和**内置 SVG 小猫**（降级用）。换形象分三种做法，按改动从小到大排：
+宠物的形象有两套（见[第六节](#六角色状态说明)）：**视频素材**（默认）和**内置 SVG 小猫**（降级用）。换形象分七种做法，按改动从小到大排：
 
 | 想做的事 | 要动的东西 | 难度 |
 | --- | --- | --- |
-| 换成自己画的角色 | 替换 `videos/` 下 7 个视频文件 | 不用改代码 |
+| 换回内置形象 zhenzhu | 顶部「更换形象」→ 点 zhenzhu 一行 | 不用改代码 |
+| 应用内导入 / 切换形象包 | 顶部「更换形象」→ 导入 zip，形象存在浏览器本地 | 不用改代码 |
+| 从网图制作可导入的形象包 | 豆包生成视频 → tools 处理 → zip 导入 | 不用改代码 |
+| 换成自己画的角色（直接改内置目录） | 替换 `videos/zhenzhu/` 下 7 个视频文件 | 不用改代码 |
+| 新增一个内置形象 | 在 `videos/` 下新建目录，并在 `character/builtin.js` 里加一项 | 改一行代码 |
 | 换个造型 / 改动作 | 改 `character/animation.js` 的 SVG + `style.css` 的动画 | 改代码 |
 | 改状态名称 / 时长 / 归类 | 改 `app.js` 的 `App.Config` | 改配置 |
 
-### 换成自己的角色（不用改代码）
+### 素材规格（所有换装方式通用）
 
-1. 准备好 7 段动画，按下面的文件名命名
-2. 丢进 `desktop-pet/videos/`，覆盖同名文件
-3. `Ctrl+F5` 强制刷新（避免缓存）
+七个文件按状态命名：`idle` / `studying` / `working` / `alert` / `done` / `refuse` / `talking`。
+每个状态优先 `.webm`，没有就找 `.mp4`，再没有就用包内/目录里的 `idle` 顶替，最后落到 SVG。
+状态含义和徽章见[第六节](#六角色状态说明)。
 
-| 文件名 | 对应状态 |
+| 要求 | 说明 |
 | --- | --- |
-| `idle.webm` | 空闲 |
-| `studying.webm` | 学习中 |
-| `working.webm` | 工作中 |
-| `alert.webm` | 提醒（任务开始） |
-| `done.webm` | 完成（任务结束） |
-| `refuse.webm` | 拒绝（任务时段摸鱼） |
-| `talking.webm` | 交流中（本地模型思考 / 回答时，见[第十八节](#十八本地大模型ollama)） |
+| 格式 | 首选 WebM（VP9 + alpha，`-pix_fmt yuva420p`）；`.mp4` 必须 H.264，HEVC 在 Chrome / Edge 上解不了 |
+| 背景 | 必须透明；黑底、白底都会被舞台看穿 |
+| 尺寸 | 720×720 正方形最合适；非正方形按 `object-fit: contain` 缩放，四周留白 |
+| 帧率/时长 | 24fps；基础态 5 秒左右且首尾能接上；临时态会被 `tempMs` 硬截断 |
+| 体积 | 单个建议 < 3MB，避免本地加载卡顿 |
 
-**命名严格区分大小写，必须完全一致。** 文件名不对 = 那个状态找不到素材。
+> 现有内置素材是 720×720 / 24fps，单段 4–10 秒；`refuse.webm` 有 10 秒，实际只播前 2.5 秒。
+> 素材调试（文件名、控制台日志、降级原因）见 [desktop-pet/videos/README.md](../desktop-pet/videos/README.md)。
 
-**素材要求：**
+### 内置形象（默认 zhenzhu）
 
-- **首选 WebM（VP9 + alpha 通道，`-pix_fmt yuva420p`）**，必须透明背景
-- 也支持 `.mp4`，但**必须是 H.264**。实测 HEVC（H.265 / `hvc1`）在 Chrome / Edge 上无法解码，放进去只会触发降级
-- 加载顺序：`<状态>.webm` → `<状态>.mp4` → 内置 SVG 小猫，逐级回退。所以少放一两个也不至于崩，缺的那个会用 `idle` 的画面顶替
-- **单个文件建议小于 3MB**，本地加载才不会卡
-- **尺寸 720×720 正方形最合适**。视频按 `object-fit: contain` 适配舞台，非正方形不会被裁剪，但会留白
-- **基础态（idle / studying / working）会循环播放，首尾帧要能自然衔接**
-- **临时态（alert / done / refuse）只播一轮**，播完自动回基础态，同时受 `tempMs` 上限约束
-- **`talking.webm` 是唯一循环的临时态**，格式要求和其他文件一样。它只服务本地大模型，不做这一个、或者模型开关没开，其他六个状态照样用
+内置形象不走 zip、不占浏览器存储，应用直接按相对路径读 `desktop-pet/videos/<目录>/` 下的七个视频。
+当前内置了 `zhenzhu`（`videos/zhenzhu/`），也是首次打开时的默认形象；顶部「更换形象」第一行即可切回。
 
-> 现有这套素材是 720×720 / 24fps / 5 秒。
+**换掉 zhenzhu 的素材**：把七个文件按上面的名字放进 `desktop-pet/videos/zhenzhu/` 覆盖同名文件，
+`Ctrl+F5` 刷新。想保留旧素材，先跑一次 `char_pack.py pack` 备份，或另建目录。
 
-### 自己制作一套视频素材（完整流程）
+**新增一个内置形象**：在 `desktop-pet/videos/` 下新建目录，放进七个视频，然后在
+`character/builtin.js` 的 `BUILTINS` 数组里加一行：
 
-从一段视频到 7 个能用的素材文件，五步。**第三步的抠图脚本是实测过的**——在一张
-720×720 合成帧上验过：四角透明、角色主体不透明、**角色内部的纯白块被正确保留**、
-边缘有羽化过渡、背景侧没有残留光晕。
+```js
+{ id: 'my-char', name: '我的角色', dir: 'videos/my-char/', ext: '.webm' }
+```
 
-#### 准备环境（只需一次）
+`Ctrl+F5` 刷新，面板里就会出现这一行。内置行不能删除，也不会写入 IndexedDB；
+把目录删掉或改名后，应用会落到 SVG 或 `videos/` 根目录素材（如果存在）。
+
+### 用形象包导入 / 切换（应用内操作）
+
+形象包就是一个 **zip**：里面按状态名放视频，可带一份 `manifest.json` 描述名字/作者/版本/备注。
+
+```
+我的角色.zip
+├── idle.webm
+├── studying.webm
+├── working.webm
+├── alert.webm
+├── done.webm
+├── refuse.webm
+├── talking.webm          # 七个状态可只放一部分
+└── manifest.json         # 可选
+```
+
+`manifest.json` 示例（缺省时用 zip 文件名作形象名）：
+
+```json
+{
+  "name": "我的角色",
+  "author": "某人",
+  "version": "1.0",
+  "note": "备注",
+  "created": "2026-10-17"
+}
+```
+
+**操作**：双击 `index.html` → 顶部「更换形象」→「导入形象包（.zip）」。导入成功后自动切换；
+列表里点任意一行即可换装，「✕」删除，「导出当前形象」把当前包重新打成 zip。
+选择存在 `localStorage`，包体存在浏览器 **IndexedDB**（库名 `desktop_pet_packs`），
+刷新/重开页面会自动恢复。**不会写入 `videos/` 目录**；清理浏览器站点数据会把导入的包一起清掉。
+
+**校验是宽松的**（方便随手打包）：
+
+- 允许任意子集，缺的状态用包内 `idle` 顶替；连 `idle` 都没有时尝试 `videos/idle.*`，再没有就落到 SVG
+- 允许 zip 里套一层目录（如 `MyChar/idle.webm`），文件名归一规则比 `make_pet_videos.py` 更宽松：
+  忽略大小写、空格、`-` 和 `_`，`studying .webm`、`Alert.MP4`、`work-ing.webm` 都能识别
+- 同一状态出现多次：保留先出现的，并给出警告
+- 上限：单个视频 10MB、解压后合计 50MB、zip 本体 60MB；超限文件跳过并警告
+- 导入时逐个探测视频能否播放，坏的丢弃；全部播不了才拒收
+- 非 WebM/MP4、`__MACOSX/`、`.DS_Store` 等自动忽略
+
+**生成 zip** 用任意压缩工具都行：把 `<状态>.webm` 放在 zip 根目录，可带 `manifest.json`，
+不要套多层目录。命令行更省事——完整命令、参数表以及 `list` / `install` 用法见下文第 5 步：
 
 ```bash
-pip install pillow numpy scipy
+# 最简：把内置形象目录打包到 desktop-pet/videos/
+python tools/video/char_pack.py pack
 ```
 
-另外需要 **ffmpeg**（抽帧和编码都靠它）。Windows 从 ffmpeg.org 下压缩包，
-把解压后 `bin/` 目录加进系统 PATH，`ffmpeg -version` 能打印版本就算好了。
+仓库里已放好两个 zip，都可以直接在「更换形象」里导入：
 
-#### 第一步：准备源素材
+- `desktop-pet/videos/zhenzhu.zip` —— 当前内置形象 zhenzhu
+- `desktop-pet/videos/_backup_20261017.zip` —— 旧版紫发少女素材
 
-自己拍、录屏、AI 生成都可以，但有几条硬要求：
+> 浏览器端不能把内置形象导出成 zip（`file://` 读不到 `videos/` 目录），所以内置行不提供导出；
+> 要拿内置形象的 zip，用 `char_pack.py pack`。
+> 需要解压 DEFLATE 条目的旧浏览器可能打不开非 STORED 的包，`char_pack.py` 默认就是 STORED。
 
-| 要求 | 为什么 |
-| --- | --- |
-| **背景是纯白**（或接近白的纯色） | 脚本按"够不够亮"判定背景，花哨背景抠不干净 |
-| **角色和背景颜色差明显** | 浅灰、米白的角色会和背景糊在一起 |
-| **固定机位，角色别出画** | 每帧独立处理，角色动没问题，但出画再回来容易断连 |
-| **720×720 正方形** | 舞台按 `object-fit: contain` 适配，非正方形会留白 |
-| **24fps、5 秒左右** | 和现有素材一致。临时态会被 `tempMs` 截断，拍长了也用不上 |
+### 从一张网图到形象包（豆包生成 + tools 处理）
 
-> **角色身上有白色怎么办？** 比如白衬衫、眼睛高光——不用担心。脚本用的是**连通域**填充，
-> 只抠「和画面四边连通」的白色；被角色包在里面的白块不与边界连通，会原样保留。
-> 这正是**不能简单粗暴地"把所有白像素变透明"**的原因。
+想把网上的角色图变成可切换的形象，最短路径是：
 
-#### 第二步：抽帧
+**免费角色图 → 豆包生成七段状态视频 → `tools/video/make_pet_videos.py` 处理 → `char_pack.py` 打包 → 应用内导入。**
 
-**先建输出目录**——ffmpeg 不会自己创建，目录不存在会直接报
-`Could not open file : frames/0001.png` 然后失败：
+全程不用改代码。
+
+> 图片请使用免费可商用素材，或你自己有权使用的图片；不要用未授权的真人肖像或他人作品。
+> 豆包只是生成工具，素材版权责任仍在使用者。
+
+#### 1. 准备角色图
+
+- 选一张正面、全身或半身、轮廓清楚的角色图，背景越干净越好。
+- 同一角色的七段视频最好都从**同一张图**生成，避免服装、画风在状态之间漂移。
+- 图片建议先裁成正方形（如 1024×1024），方便后续生成 720×720 视频。
+
+#### 2. 用豆包生成七段状态视频
+
+打开豆包的「图生视频」（图片生视频）功能，上传角色图，按状态逐段生成。提示词里尽量写清：
+
+- 保持同一角色、同一服装、同一画风；
+- **纯白背景**——工具按白底抠图，背景不白会抠不干净；
+- 固定机位，角色完整不出画；
+- 正方形构图，约 5 秒；
+- 对应状态的动作，见下表。
+
+| 状态 | 建议文件名 | 动作 |
+| --- | --- | --- |
+| 空闲 | `idle.mp4` | 轻微呼吸、眨眼，首尾姿态一致 |
+| 学习中 | `studying.mp4` | 看书、写字、翻页 |
+| 工作中 | `working.mp4` | 打字、敲键盘 |
+| 提醒 | `alert.mp4` | 抬头、举手或指向某处 |
+| 完成 | `done.mp4` | 开心、比手势、庆祝 |
+| 拒绝 | `refuse.mp4` | 摆手、摇头 |
+| 交流中 | `talking.mp4` | 说话、口型变化 |
+
+- 基础态（idle / studying / working）会循环播放，**首尾帧要能接上**；临时态（alert / done / refuse）
+  只播一轮，时长上限分别是 5s / 3.5s / 2.5s，生成太长会被截断。
+- 豆包视频通常带「豆包AI生成」水印，下一步的工具会自动去水印；水印样式不同时用
+  `--no-watermark` 跳过，再手动处理。
+
+#### 3. 用项目工具处理视频
+
+工具是 `tools/video/make_pet_videos.py`，需要 Python 3.10+ 和三个依赖：
 
 ```bash
-mkdir frames          # 必须先建，ffmpeg 不会替你建
-ffmpeg -i 源视频.mp4 -vf scale=720:720 frames/%04d.png
+pip install numpy opencv-python-headless scipy
 ```
 
-得到 `frames/0001.png`、`0002.png`…。帧数 = 时长 × 帧率，5 秒 24fps 就是 120 张。
-源视频不是白底（比如绿幕）的话，这一步之前先自己抠掉，本文只处理白底。
-
-> 下一步的 `out/` 目录**不用手动建**，抠图脚本里有 `mkdir(parents=True, exist_ok=True)`，会自己创建。
-
-#### 第三步：抠背景
-
-把下面这段存成 `remove_bg.py`，和 `frames/` 放同级目录：
-
-```python
-#!/usr/bin/env python3
-"""白底视频抠背景：只移除与画面四边连通的背景，角色内部的白色保留。
-
-    python remove_bg.py frames/ out/ [容差]
-"""
-import sys
-from pathlib import Path
-
-import numpy as np
-from PIL import Image, ImageFilter
-from scipy import ndimage
-
-SRC = Path(sys.argv[1] if len(sys.argv) > 1 else 'frames')
-DST = Path(sys.argv[2] if len(sys.argv) > 2 else 'out')
-TOL = int(sys.argv[3]) if len(sys.argv) > 3 else 32      # 0-255，越大抠掉越多
-
-if not SRC.is_dir():
-    sys.exit(f'找不到目录 {SRC}/，先跑上一步把视频抽成 PNG 帧')
-if not sorted(SRC.glob('*.png')):
-    sys.exit(f'{SRC}/ 里没有 PNG，确认抽帧那步跑成功了')
-
-DST.mkdir(parents=True, exist_ok=True)
-
-for p in sorted(SRC.glob('*.png')):
-    rgb = np.asarray(Image.open(p).convert('RGB')).astype(np.int16)
-
-    # 1. 候选背景像素：亮度够高。用亮度而不是"必须纯白"，容忍噪点和浅阴影
-    cand = rgb.mean(axis=2) >= (255 - TOL)
-
-    # 2. 连通域标记，只保留与四边相连的那一块 —— 内部白块不被误抠的关键就是这一步
-    lab, _ = ndimage.label(cand)
-    border = set(lab[0, :]) | set(lab[-1, :]) | set(lab[:, 0]) | set(lab[:, -1])
-    border.discard(0)                       # 0 是"非候选"标签，不能当背景
-    bg = np.isin(lab, list(border))
-
-    # 3. 硬边 alpha：背景全透明，角色全不透明
-    alpha = np.where(bg, 0, 255).astype(np.uint8)
-
-    # 4. 向内收 1px 再羽化，消掉边缘残留的白色描边（不想要软边就删掉这两行）
-    solid = ndimage.binary_erosion(~bg, iterations=1)
-    soft = Image.fromarray((solid * 255).astype(np.uint8), 'L') \
-                .filter(ImageFilter.GaussianBlur(0.8))
-    alpha = np.minimum(alpha, np.asarray(soft))   # min 保证背景侧仍是 0，不外溢成光晕
-
-    out = Image.merge('RGBA', (*Image.fromarray(
-        np.clip(rgb, 0, 255).astype(np.uint8), 'RGB').split(),
-        Image.fromarray(alpha, 'L')))
-    out.save(DST / p.name)
-    print(f'  {p.name}  判定为背景 {bg.mean() * 100:.1f}%')
-```
-
-跑：
+**输入**可以是整个目录，也可以是单个视频文件。目录只扫一层、不递归子目录；
+支持的输入扩展名是 `.mp4` / `.webm` / `.mov` / `.mkv` / `.avi`，输出统一为 `.webm`。
 
 ```bash
-python remove_bg.py frames out 32
+# 处理整个目录（只处理文件名能识别成七种状态之一的视频）
+python tools/video/make_pet_videos.py 我的视频 --out new_video/processed
+
+# 只处理一个文件
+python tools/video/make_pet_videos.py "我的视频/studying .mp4" --out new_video/processed
+
+# 直接写进内置形象目录（会覆盖同名文件，先备份！）
+python tools/video/make_pet_videos.py 我的视频 --out desktop-pet/videos/zhenzhu
 ```
 
-第三个参数是容差：**抠不干净就调大，角色被啃掉就调小**。结果写到 `out/`。
+文件名规则：去掉扩展名、去掉首尾空格、转小写；`studying .mp4`、`Alert.MP4` 都能识别，
+其它名字会跳过并提示。每个输入按状态名输出 `<状态>.webm`。
 
-每帧会打印判定为背景的像素占比——**这个数应该每帧都差不多**。
-某一帧突然跳变，说明那帧有问题（角色出画、光线突变、或者背景上有阴影），回头单独看那张。
+工具会依次完成：**去水印 → 白底转透明（保留角色内部白色）→ VP9 + alpha 编码
+（720×720 / 24fps）→ 校验 alpha**。常用参数：
 
-#### 第四步：编码成 VP9-alpha WebM
+| 参数 | 默认 | 用途 |
+| --- | --- | --- |
+| `input` | 必填 | 输入目录或单个视频文件 |
+| `--out` | 必填 | 输出目录 |
+| `--ffmpeg` | 自动 | 指定 ffmpeg 路径 |
+| `--fps` | `24` | 抽帧与编码帧率 |
+| `--crf` | `34` | VP9 质量；越大体积越小、越糊 |
+| `--tol` | `32` | 白底容差；背景没抠干净调大，角色白色被吃掉调小 |
+| `--feather` | `0.8` | 边缘羽化像素 |
+| `--watermark` | `assets/doubao_watermark.npz` | 水印模板 |
+| `--watermark-high` | `0.05` | 水印命中阈值；漏删调低 |
+| `--watermark-low` | `0.02` | 淡入淡出延展阈值 |
+| `--no-watermark` | 关 | 跳过去水印（水印样式不同或已手动处理时） |
+| `--no-bg` | 关 | 跳过抠背景，只转码 |
+| `--keep-frames` | 关 | 保留中间帧，便于排查 |
+
+运行时会逐个文件打印结果：
+
+```
+[处理] idle.mp4 -> idle.webm
+  120 帧 / 5.00s / 820 KB / yuva420p / alpha 0-255 透明 62% / 去水印 120 帧
+...
+完成 7 个，失败 0 个，输出：new_video/processed
+```
+
+- `alpha` 的透明占比取决于角色占画面的比例；如果接近 0%，说明背景没被抠掉。
+- 退出码：全部成功为 0，有文件失败为 1，便于脚本化调用。
+- ffmpeg 查找顺序：`--ffmpeg` → 环境变量 `FFMPEG` → `tools/video/ffmpeg.exe` → `PATH` →
+  `imageio-ffmpeg`。本机已带 `tools/video/ffmpeg.exe`（约 84MB，已被 `.gitignore` 排除）。
+- Windows 终端中文乱码时，命令前加 `PYTHONIOENCODING=utf-8`。
+- 输出目录 `new_video/processed/` 是临时目录（已 gitignore），导入后可以删掉；
+  不要直接写进 `desktop-pet/videos/zhenzhu/`，除非你已经用 `char_pack.py pack` 备份过旧素材。
+- 加 `--keep-frames` 会在输出目录下保留抽帧 PNG，处理完不自动删；排查水印或抠图问题时用。
+- 完整说明与水印模板标定方法见 [tools/video/README.md](../tools/video/README.md)。
+
+#### 4. 检查输出
+
+终端会打印每个文件的帧数、时长、体积、`pix_fmt` 和 alpha 占比；**任一文件没有透明像素会给出警告**。
+播放检查时，透明背景应该能透出后面的内容，而不是黑底。需要手动确认 alpha：
 
 ```bash
-ffmpeg -framerate 24 -i out/%04d.png -c:v libvpx-vp9 -pix_fmt yuva420p \
-       -crf 34 -b:v 0 -auto-alt-ref 0 -row-mt 1 -an idle.webm
+tools/video/ffmpeg.exe -c:v libvpx-vp9 -i new_video/processed/idle.webm
 ```
 
-- **`-auto-alt-ref 0` 是最容易踩的一个**：少了它，VP9 的 alpha 通道不生效，
-  透明背景会变成**纯黑**。这条务必别省
-- `-pix_fmt yuva420p` —— 带 alpha 的像素格式，末尾那个 `a` 就是 alpha
-- `-crf 34 -b:v 0` —— 恒定质量模式，体积和画质平衡点。嫌糊调小 crf，嫌大调大
-- `-an` —— 丢掉音轨，本来就没人听
-- `-row-mt 1` —— 多线程，纯加速
+看到 `yuva420p` 才算对。直接用 `ffmpeg -i` 可能显示 `yuv420p`，那是内置 vp9 解码器不读 alpha，
+不是文件坏了。
 
-七个状态各编一次，换掉最后的输出文件名。
+#### 5. 打成形象包
 
-#### 第五步：验证 alpha 真的进去了
+`char_pack.py` 只用 Python 标准库，不需要再装 numpy / opencv。
 
-**别只靠肉眼看播放器**——很多播放器拿黑色当底显示，透明和纯黑根本分不出来。用 ffprobe 查：
+**打包**：
 
 ```bash
-ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 idle.webm
+python tools/video/char_pack.py pack --name "我的角色" --videos new_video/processed --out desktop-pet/videos
 ```
 
-输出必须是 **`yuva420p`**。如果打印的是 `yuv420p`（末尾少个 `a`），
-说明 alpha 没进去，回去检查 `-auto-alt-ref 0` 和 `-pix_fmt` 那两句。
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `--name` | `默认形象-紫发少女` | 形象名，同时作为 zip 文件名 |
+| `--author` | 空 | 写入 `manifest.json` |
+| `--version` | `1.0` | 写入 `manifest.json` |
+| `--note` | 空 | 写入 `manifest.json` |
+| `--videos` | `desktop-pet/videos/zhenzhu` | 素材目录 |
+| `--out` | `desktop-pet/videos` | zip 输出目录 |
+| `--method` | `stored` | `stored` 兼容性最好；`deflated` 体积更小，但旧浏览器可能打不开 |
 
-确认无误后，把 7 个文件丢进 `desktop-pet/videos/` 覆盖同名文件，`Ctrl+F5` 刷新即可。
+打包时按七种状态的顺序收集，每个状态优先 `.webm`、其次 `.mp4`；缺状态会在终端提示，
+zip 里只放现有的。`manifest.json` 会自动写入 `name / author / version / note / created`。
+`pack` 只扫 `--videos` 顶层，文件名必须是精确的 `<状态>.webm` / `<状态>.mp4`，不会像应用内导入
+那样归一化空格或连字符。
 
-#### 基础态和临时态分别注意什么
+**查看包内容**：
 
-| 类型 | 注意 |
-| --- | --- |
-| **基础态**（idle / studying / working） | 会**无限循环播放**，首尾帧必须能自然衔接。做法：录一段首尾姿态一致的循环动作，或者把结尾几帧裁掉让动作回到起点 |
-| **临时态**（alert / done / refuse） | 只播一轮。时长受 `App.Config.tempMs` 约束（alert 5s / done 3.5s / refuse 2.5s），**拍长了会被硬截断**，不如按要求裁剪好 |
+```bash
+python tools/video/char_pack.py list desktop-pet/videos/我的角色.zip
+```
 
-> 素材的正确性要求、文件名清单、以及页面里不生效时该看哪条控制台日志，
-> 都写在 **[desktop-pet/videos/README.md](../desktop-pet/videos/README.md)**（那份和素材放一起，
-> 换素材时随手就能翻到）。本节的流程 + 那份的清单，两边不重复。
+会打印 manifest 和每个条目识别出的状态、大小，用来确认文件名没有写错。
+
+**安装回磁盘（可选）**：
+
+```bash
+python tools/video/char_pack.py install desktop-pet/videos/我的角色.zip
+```
+
+默认解压到 `desktop-pet/videos/zhenzhu/`，只覆盖 zip 里出现的状态，其余素材保持不动；
+覆盖前会把旧文件复制到 `desktop-pet/videos/_backup_<日期>/`。可以用 `--videos <目标目录>` 改安装位置。
+如果只是应用内导入，不需要这一步。
+
+#### 6. 导入并切换
+
+回到本节开头的「用形象包导入 / 切换」：顶部「更换形象」→「导入形象包（.zip）」→ 选刚生成的 zip。
+导入成功后自动切换，刷新页面也会恢复。
+
+想让它成为**内置形象**（不占浏览器存储）：把 webm 放进 `desktop-pet/videos/我的角色/`，
+再在 `character/builtin.js` 的 `BUILTINS` 里加一行，详见上文「内置形象」。
+
+### 手工流程（理解原理用）
+
+工具内部固定四步：**抽帧 → 去水印 → 白底转透明 → VP9-alpha 编码并校验**。
+每一步的实现、参数和排错都在 [tools/video/README.md](../tools/video/README.md)，
+代码在 `tools/video/make_pet_videos.py`，关键步骤有中文注释。
+
+日常换形象直接跑工具即可，不需要手工做。只有工具不适用的素材（非白底、水印样式不同、
+需要逐帧修图）才需要按 README 的排查章节单独处理。
+
+> 早期版本这里有一份完整的「ffmpeg 抽帧 + Python 连通域抠图 + 手工编码」脚本，
+> 现已删除，避免和工具脚本维护两份、改了一处忘了另一处。
 
 ### 改 SVG 小猫的造型和动作
 
 视频素材全都加载不上时会用这套内置动画，也可以主动加 `?novideo=1` 强制启用。
 
-**造型**在 `desktop-pet/character/animation.js` 的 `svgMarkup()` 函数里（约 20-119 行），是一整段内联的 SVG 字符串，画布 `viewBox="0 0 200 200"`。里面分好了组，改颜色/改形状直接编辑对应分组：
+**造型**在 `desktop-pet/character/animation.js` 的 `svgMarkup()` 函数里（约 21-120 行），是一整段内联的 SVG 字符串，画布 `viewBox="0 0 200 200"`。里面分好了组，改颜色/改形状直接编辑对应分组：
 
 | 分组 | 部位 |
 | --- | --- |
@@ -1053,7 +1170,7 @@ ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 id
 | `sign-cross` | 拒绝状态的 ✕ 符号 |
 | `sparkle` | 完成状态的星光 |
 
-**动作**（每个状态怎么动）在 `desktop-pet/style.css` 约 505-690 行，选择器形如：
+**动作**（每个状态怎么动）在 `desktop-pet/style.css` 约 716-917 行，选择器形如：
 
 ```css
 .stage[data-state="studying"] .arm-r {
@@ -1070,18 +1187,14 @@ ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 id
 
 ### 改状态文案、时长和归类
 
-都在 `desktop-pet/app.js` 的 `App.Config`（约 132-178 行）。跟形象相关的几项是：
+相关配置都在 `desktop-pet/app.js` 的 `App.Config`（约 149-211 行）：
+`stateLabel`（徽章文字）、`stateByCategory`（类别 → 基础态）、
+`tempMs`（临时态时长，素材更长会被截断）、`refusePhrases`（拒绝话术）。
+每一项的含义见[第十二节](#怎么改一个任务默认多长时间之类的设置)的完整表格，这里不再重复。
 
-- **`stateLabel`** —— 徽章文字。想改叫法（或者换成英文）改这里
-- **`stateByCategory`** —— 任务类别 → 基础态。想让「通用」类任务也显示学习状态，把 `general` 改成 `'studying'`
-- **`tempMs`** —— 各临时态持续多久，素材比它长就会被截断
-- **`refusePhrases`** —— 两级拒绝话术，含 `{category}` / `{title}` 占位
-
-其余可调项（默认时长、提醒提前量、周期窗口等）见[第十二节](#怎么改一个任务默认多长时间之类的设置)的完整表格。
-
-> 任务类别（`studying` / `working` / `general`）由标题关键词自动判断，关键词表在同文件 `App.Config.keywords`。
-> `keywords.entertainment` 单独一组，决定什么话会被当成摸鱼（触发 `refuse`），
-> 配合 `App.Config.entertainmentPatterns` 的宽松正则一起判定，详见[第七节](#七跨状态拒绝)。
+任务类别（`studying` / `working` / `general`）由标题关键词自动判断，关键词表见
+`App.Config.keywords`；`keywords.entertainment` 单独决定什么话算摸鱼（触发 `refuse`），
+配合 `App.Config.entertainmentPatterns` 判定，详见[第七节](#七跨状态拒绝)。
 
 ### 换形象时的常见问题
 
@@ -1252,7 +1365,7 @@ export OLLAMA_ORIGINS="*"
 ### 隐私
 
 - 请求只发给**你自己填的地址**，且必须是本机或局域网地址（`localhost` / `127.*` / `10.*` / `192.168.*` / `172.16-31.*`）。填公网地址会被拒绝并回落到默认值——这是防止设置被篡改后把你说的话发到外网。
-- 发给模型的内容有三块：你的那句话、你的日程清单（今天+明天，最多 30 条）、最近 12 轮对话。
+- 发给模型的内容有三块：你的那句话、你的日程清单（今天+明天+后天，最多 30 条）、最近 12 轮对话。
 - **对话记录只存在内存里**，刷新页面就没了，不写 LocalStorage，也不落盘。
 - 开关关着的时候，以上全部不发生。
 
@@ -1268,13 +1381,13 @@ export OLLAMA_ORIGINS="*"
 | `intentMaxTokens` | `256` | 意图 JSON 的输出上限 |
 | `chatMaxTokens` | `512` | 聊天回复的长度上限 |
 | `historyTurns` | `12` | 记着最近多少轮对话 |
-| `contextTaskDays` | `2` | 提示词里带几天的日程（今天+明天） |
+| `contextTaskDays` | `3` | 提示词里带几天的日程（今天+明天+后天） |
 | `contextMaxTasks` | `30` | 提示词里最多列几条任务 |
 
 想验证接得通不通，在仓库根目录跑：
 
 ```bash
-npm test                      # 离线：全部 9 个套件 508 条断言，不联网。test-llm.js 占其中 214 条
+npm test                      # 离线：全部 11 个套件 647 条断言，不联网。test-llm.js 占其中 219 条
 npm run test:live             # 联网：真连 Ollama 跑一遍完整链路（42 条）
 ```
 
