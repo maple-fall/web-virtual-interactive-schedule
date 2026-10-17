@@ -237,7 +237,7 @@ function pageScript(pdfB64, csvText, foreignB64, timetableB64) {
   if (out.foreignPending) await say('取消');
 
   // 6. 教务系统网格课表：选完文件直接进待确认，不额外问日期
-  // 样本是个人课表、可能不在仓库里；没有就整组跳过（ttPending 留 undefined 作标记）
+  // 样本课表可能没跟着仓库走；没有就整组跳过（ttPending 留 undefined 作标记）
   if (timetableBytes.length) {
   feed('timetable.pdf', 'application/pdf', timetableBytes);
   out.ttPending = await waitPending(30000);
@@ -377,8 +377,8 @@ function pageScript(pdfB64, csvText, foreignB64, timetableB64) {
 
     console.log('\n=== 7. 教务系统网格课表（xxx 课表，需内置 CMap）===');
     if (!timetableB64) {
-      console.log('  ~ 跳过：data/xxx课表.pdf 不在仓库（个人课表），' +
-        '放回同名文件即恢复');
+      console.log('  ~ 跳过：data/xxx课表.pdf 不在仓库，' +
+        '放回同名文件即恢复（样本已匿名化，可随仓库分发）');
     } else {
     check('选完文件直接进待确认（不再问学期日期）', r.ttPending);
     check('识别为课表并写进了报告', /识别为课表|门课/.test(r.ttReport || ''),
@@ -392,7 +392,7 @@ function pageScript(pdfB64, csvText, foreignB64, timetableB64) {
     check('title 带教室地点', r.ttTitles.some(t => /(H1-305|H4-413)/.test(t)),
       JSON.stringify(r.ttTitles.slice(0, 3)));
     check('表外文字没混进来',
-      !r.ttTitles.some(t => /梁浩贤课表|学号|打印时间|使用说明/.test(t)));
+      !r.ttTitles.some(t => /xxx课表|学号|打印时间|使用说明/.test(t)));
 
     check('回复别的日期能就地重算', r.ttShifted);
     check('重算后日期整体后移（没有早于 09-07 的课）', r.ttShiftedMoved);

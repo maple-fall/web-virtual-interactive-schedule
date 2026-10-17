@@ -1,6 +1,6 @@
 /*
  * 无头测试：验证「教务系统网格课表 PDF → 日程」的解析与展开
- * 样本：desktop-pet/data/xxx课表.pdf（90° 旋转的星期×节次网格，
+ * 样本：desktop-pet/data/xxx课表.pdf（WPS 导出的常规表格：星期为列、节次为行，
  *       STSong-Light 标准字体、无内嵌 ToUnicode，必须靠内置 CMap 才提得出文字）
  * 覆盖：CMap 提取、跨页续接、单双周、折行标题、场地写进 title、节次→时间映射、
  *       学期起始日推断、过去课程过滤，以及「模板 PDF 不走课表分支」的回归。
@@ -62,7 +62,7 @@ function check(name, cond, extra) {
   else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '  -> ' + extra : '')); }
 }
 
-const TERM = '2026-08-31';                 // 该课表第 1 周周一（按打印日期 2026-09-19 推断）
+const TERM = '2026-08-31';                 // 该课表第 1 周周一（按「2026-2027 学年第 1 学期」推断）
 const NOW_BEFORE = new Date(2026, 7, 30).getTime();   // 开学前一天：无过去过滤
 const TPL_NOW = new Date('2026-09-20T09:00:00').getTime();  // 模板基准日：早于模板里所有写死的日期
 const TOTAL = 275;                         // 全部课程展开后的节次数（手算核对）
@@ -79,7 +79,7 @@ function weekOf(dateStr) {
   return Math.floor((d - mon) / 86400000 / 7) + 1;
 }
 
-// 样本是个人课表，可能不在仓库里；缺了就跳过依赖它的 1-6 组，7-8 组照跑
+// 样本课表可能没跟着仓库走；缺了就跳过依赖它的 1-6 组，7-8 组照跑
 const hasSample = fs.existsSync(TT_PDF);
 
 async function templateGroups() {
@@ -102,7 +102,7 @@ async function templateGroups() {
   if (!hasSample) {
     console.log('\n=== 1-6. 课表 PDF 解析：跳过 ===');
     console.log('  样本不在：' + path.relative(path.join(__dirname, '..'), TT_PDF));
-    console.log('  那是教务系统导出的个人课表，不便入库；放回同名文件后本组自动恢复。');
+    console.log('  放回同名文件后本组自动恢复（样本已匿名化，可随仓库分发）。');
     await templateGroups();
     console.log('\n--- 结果：' + pass + ' 通过 / ' + fail + ' 失败（1-6 组已跳过）---\n');
     process.exit(fail ? 1 : 0);
@@ -130,7 +130,7 @@ async function templateGroups() {
     titles.filter(t => /数字孪生/.test(t)).length === 2,
     JSON.stringify(titles.filter(t => /数字孪生/.test(t))));
   check('表外文字没被当成课程',
-    !titles.some(t => /梁浩贤课表|学号|打印时间|使用说明/.test(t)));
+    !titles.some(t => /xxx课表|学号|打印时间|使用说明/.test(t)));
 
   console.log('\n=== 2. 节次 → 时间映射 ===');
   const byTitle = t => res.timetable.filter(e => e.title.indexOf(t) === 0);
@@ -141,11 +141,11 @@ async function templateGroups() {
   check('15-16节 → 20:30-21:50', db && db.startTime === '20:30' && db.endTime === '21:50',
     db && db.startTime + '-' + db.endTime);
   check('星期一 = weekday 1', ds && ds.weekday === 1, ds && ds.weekday);
-  const tx = byTitle('体能训练 III')[0];
+  const tx = byTitle('体能训练III')[0];
   check('星期五 = weekday 5', tx && tx.weekday === 5, tx && tx.weekday);
 
   console.log('\n=== 3. 学期起始日推断 ===');
-  check('按「打印时间:2026-09-19」推断出第 1 周周一 = ' + TERM,
+  check('按「2026-2027 学年第 1 学期」推断出第 1 周周一 = ' + TERM,
     res.termMonday === TERM, res.termMonday);
   check('标记为推断值（不是用户存过的）', res.termSource === 'guess', res.termSource);
 

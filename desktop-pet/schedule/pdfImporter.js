@@ -186,8 +186,9 @@
     /* arrayBuffer -> Promise<{fatal, rows, errors, warnings}>
        两条路径：
        - 五列模板（date/start/end/title/category）→ 重建 CSV 交给 parser，返回 parser 结果
-       - 教务系统网格课表 → 交给 App.TimetableImporter，返回 {timetable, termMonday}，
-         由调用方问一句学期起始日期后再展开（展开也复用 parser 的校验） */
+       - 教务系统课表（90° 旋转网格或常规横向表格）→ 交给 App.TimetableImporter，
+         返回 {timetable, termMonday}，由调用方问一句学期起始日期后再展开
+         （展开也复用 parser 的校验） */
     import: function (arrayBuffer, nowMs) {
       if (!lib) return Promise.resolve(fatal('PDF 组件未加载（缺少 lib/pdfjs/pdf.min.js）'));
 
@@ -221,7 +222,7 @@
           });
 
           var res = rebuild(rows, nowMs);
-          // 不像五列表格：试试是不是教务系统的「星期×节次」网格课表
+          // 不像五列表格：试试是不是教务系统的「星期×节次」课表
           if (res.fatal && App.TimetableImporter) {
             var tt = App.TimetableImporter.parse(pages, nowMs);
             if (!tt.fatal) {

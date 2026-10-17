@@ -685,6 +685,7 @@
 
     /* ---- 删除 ---- */
     doDelete: function (intent) {
+      if (intent.bulk) { this.doBulkDelete(intent); return; }
       var candidates = App.Manager.findCandidates({
         date: intent.date,
         titleFrag: intent.target ? intent.target.titleFrag : null,
@@ -707,6 +708,7 @@
 
     /* ---- 修改 ---- */
     doUpdate: function (intent) {
+      if (intent.bulk) { this.doBulkUpdate(intent); return; }
       var candidates = App.Manager.findCandidates({
         date: intent.targetDate || intent.date,
         titleFrag: intent.target ? intent.target.titleFrag : null,
@@ -726,13 +728,174 @@
 
     commitUpdate: function (id, intent) {
       var t = App.Manager.get(id);
-      App.Manager.update(id, intent.patches || {});
-      var parts = [];
+      if (!t) {
+        this.announce('这条安排已经不在计划里了。', { mood: 'idle', ms: 3500 });
+        return;
+      }
+      var oldTitle = t.title;
       var p = intent.patches || {};
+      App.Manager.update(id, p);
+      var parts = [];
       if (p.date) parts.push('日期改到 ' + this.dateLabel(p.date));
       if (p.startTime) parts.push('时间改成 ' + p.startTime);
-      this.announce('好的，「' + t.title + '」' + (parts.join('，') || '已更新') + '。',
+      if (p.durationMin) parts.push('时长改成 ' + p.durationMin + ' 分钟');
+      if (p.title && p.title !== oldTitle) parts.push('标题改成「' + App.util.escapeHtml(p.title) + '」');
+      var name = p.title || oldTitle;
+      this.announce('好的，「' + name + '」' + (parts.join('，') || '已更新') + '。',
         { mood: 'happy', ms: 4500 });
+    },
+
+    /* ---- 批量修改 / 删除：都、所有、每、改名 ----
+       多条命中时先列样例再确认，确认后才一次落库。 */
+    weekdayName: function (w) {
+      return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][w] || '';
+    },
+
+    bulkTargetLabel: function (target) {
+      target = target || {};
+      var parts = [];
+      if (target.date) parts.push(this.dateLabel(target.date));
+      if (target.weekday != null) parts.push('每' + this.weekdayName(target.weekday));
+      if (target.dateFrom) {
+        parts.push(this.dateLabel(target.dateFrom) + '–' + this.dateLabel(target.dateTo));
+      }
+      if (target.startTime) parts.push(target.startTime + ' 开始');
+      if (target.titleFrag) parts.push('「' + App.util.escapeHtml(target.titleFrag) + '」');
+      return parts.join(' ') || '全部安排';
+    },
+
+    bulkPatchLabel: function (intent) {
+      var p = intent.patches || {};
+      var parts = [];
+      if (p.title) parts.push('标题改成「' + App.util.escapeHtml(p.title) + '」');
+      if (p.weekday != null) {
+        parts.push('移到每' + this.weekdayName(p.weekday) +
+          (p.startTime ? ' ' + p.startTime + ' 开始' : '，时间保持不变'));
+      }
+      if (p.startTime && p.weekday == null) parts.push('开始时间改成 ' + p.startTime);
+      if (p.durationMin) parts.push('时长改成 ' + p.durationMin + ' 分钟');
+      if (p.timeDeltaMin) {
+        parts.push((p.timeDeltaMin > 0 ? '整体延后 ' : '整体提前 ') +
+          Math.abs(p.timeDeltaMin) + ' 分钟');
+      }
+      if (p.date && p.weekday == null) parts.push('日期改成 ' + this.dateLabel(p.date));
+      return parts.join('，') || '保持不变';
+    },
+
+    bulkSample: function (list) {
+      var self = this;
+      var rows = list.slice(0, 5).map(function (t) {
+        return '<li>' + self.dateLabel(t.date) + ' ' + t.startTime + '–' + t.endTime +
+          ' ' + App.util.escapeHtml(t.title) + '</li>';
+      }).join('');
+      if (list.length > 5) rows += '<li>……还有 ' + (list.length - 5) + ' 项</li>';
+      return '<ul class="query-list">' + rows + '</ul>';
+    },
+
+    bulkQuery: function (target) {
+      target = target || {};
+      return App.Manager.findCandidates({
+        date: target.date || null,
+        weekday: target.weekday != null ? target.weekday : null,
+        dateFrom: target.dateFrom || null,
+        dateTo: target.dateTo || null,
+        titleFrag: target.titleFrag || null,
+        startTime: target.startTime || null
+      });
+    },
+
+    doBulkUpdate: function (intent) {
+      var target = intent.target || {};
+      var all = this.bulkQuery(target);
+      var skipped = 0;
+      var candidates = all;
+      if (!intent.includeDone) {
+        candidates = all.filter(function (t) { return t.status !== 'done'; });
+        skipped = all.length - candidates.length;
+      }
+
+      if (!candidates.length) {
+        this.announce('没有找到要修改的安排' +
+          (skipped ? '（另有 ' + skipped + ' 项已完成的没有算）' : '') + '。',
+          { mood: 'idle', ms: 4000 });
+        return;
+      }
+
+      // 多条压到同一个具体日期必然重叠，直接拦下；按星期移动才是批量语义
+      if (candidates.length > 1 && intent.patches && intent.patches.date &&
+          intent.patches.weekday == null) {
+        this.announce('找到 ' + candidates.length + ' 项安排。批量修改不能全部压到同一个日期，' +
+          '请改成「改到周二」这种按星期移动的说法。', { mood: 'idle', ms: 6500 });
+        return;
+      }
+
+      var pend = { type: 'confirm-bulk-update', intent: intent,
+                   candidates: candidates, skipped: skipped };
+      if (candidates.length === 1) {
+        this.commitBulkUpdate(pend);
+        return;
+      }
+
+      this.pending = pend;
+      this.announce('找到 ' + candidates.length + ' 项' + this.bulkTargetLabel(target) +
+        '：' + this.bulkSample(candidates) +
+        '将' + this.bulkPatchLabel(intent) +
+        (skipped ? '（另有 ' + skipped + ' 项已完成，不动）' : '') +
+        '。确认吗？（回复「确认」或「取消」）',
+        { mood: 'alert', ms: 9000 });
+    },
+
+    commitBulkUpdate: function (pend) {
+      this.pending = null;
+      var ids = pend.candidates.map(function (t) { return t.id; })
+        .filter(function (id) { return !!App.Manager.get(id); });
+      if (!ids.length) {
+        this.announce('这些安排已经不在计划里了。', { mood: 'idle', ms: 3500 });
+        return;
+      }
+
+      var res = App.Manager.updateMany(ids, pend.intent.patches || {});
+      var parts = [];
+      if (res.moved) parts.push('移动 ' + res.moved + ' 项');
+      if (res.renamed) parts.push('改名 ' + res.renamed + ' 项');
+      if (res.retimed) parts.push('调整时间 ' + res.retimed + ' 项');
+      var msg = '好的，已更新 ' + res.updated + ' 项安排' +
+        (parts.length ? '（' + parts.join('、') + '）' : '') + '。';
+      if (pend.skipped) msg += '另有 ' + pend.skipped + ' 项已完成，没有动。';
+      if (res.newConflicts) {
+        msg += '有 ' + res.newConflicts + ' 处新出现的时间重叠，可以在计划表里检查一下。';
+      }
+      this.announce(msg, { mood: 'happy', ms: 6000 });
+    },
+
+    doBulkDelete: function (intent) {
+      var target = intent.target || {};
+      var candidates = this.bulkQuery(target);
+      if (!candidates.length) {
+        this.announce('没有找到要删除的安排。', { mood: 'idle', ms: 3500 });
+        return;
+      }
+
+      var pend = { type: 'confirm-bulk-delete', intent: intent, candidates: candidates };
+      if (candidates.length === 1) {
+        this.commitBulkDelete(pend);
+        return;
+      }
+
+      this.pending = pend;
+      this.announce('找到 ' + candidates.length + ' 项' + this.bulkTargetLabel(target) +
+        '：' + this.bulkSample(candidates) +
+        '确认全部删除吗？（回复「确认」或「取消」）',
+        { mood: 'alert', ms: 9000 });
+    },
+
+    commitBulkDelete: function (pend) {
+      this.pending = null;
+      var ids = pend.candidates.map(function (t) { return t.id; })
+        .filter(function (id) { return !!App.Manager.get(id); });
+      var n = App.Manager.removeMany(ids);
+      this.announce(n ? '已删除 ' + n + ' 项安排。' : '这些安排已经不在计划里了。',
+        { mood: 'idle', ms: 4000 });
     },
 
     /* ---- 查询 ----
@@ -748,14 +911,22 @@
       var now = App.Clock.now();
       var today = App.Clock.today();
       var explicitDate = q.scope === 'date';
+      var weekdayScope = q.scope === 'weekday' && q.weekday != null;
       var baseDate = intent.date || today;
       var titleFrag = q.titleFrag || null;
-      var multiDay = !!titleFrag && !explicitDate;
+      var multiDay = weekdayScope || (!!titleFrag && !explicitDate);
 
       var pool;
-      // 「英语课什么时候」「下一项」这类跨天问题要在全库未来日程里找；
+      // 「每周一」「周一都…」按星期聚合，在所有未来日程里找；
+      // 「英语课什么时候」「下一项」也在全库未来日程里找；
       // 指定了日期就只在该日找。普通清单查询仍只看 baseDate 当天。
-      if (titleFrag || q.next || q.askEta) {
+      if (weekdayScope) {
+        pool = App.Manager.all().filter(function (t) {
+          if (t.date < today) return false;
+          var d = App.util.parseDateStr(t.date);
+          return d && d.getDay() === q.weekday;
+        });
+      } else if (titleFrag || q.next || q.askEta) {
         pool = App.Manager.all().filter(function (t) {
           if (explicitDate) return t.date === baseDate;
           return t.date >= today;
@@ -789,7 +960,7 @@
       if (q.limit && tasks.length > q.limit) tasks = tasks.slice(0, q.limit);
 
       var label = this.dateLabel(baseDate);
-      var where = label;
+      var where = weekdayScope ? '每' + this.weekdayName(q.weekday) : label;
       if (q.windowLabel) {
         // 「明天下午」「后天 12:00 后」：中文时段直接拼，带数字的窗口留个空格
         where += /^[凌晨早上早晨清晨上午中午下午傍晚晚上]+$/.test(q.windowLabel)
@@ -839,7 +1010,7 @@
       if (!tasks.length) {
         var empty = titleFrag
           ? '没有找到「' + App.util.escapeHtml(titleFrag) + '」的安排。'
-          : where + (q.remainingOnly ? '没有剩余安排了，好好休息吧～' : '没有安排。');
+          : where + (q.remainingOnly && !weekdayScope ? '没有剩余安排了，好好休息吧～' : '没有安排。');
         this.announce(empty, { mood: 'idle', ms: 4000 });
         return;
       }
@@ -864,7 +1035,8 @@
         ? '找到 ' + tasks.length + ' 项安排，看计划表哦'
         : where + '有 ' + tasks.length + ' 项安排，看计划表哦', { ms: 4000 });
       App.bus.emit('query:highlight', {
-        ids: tasks.map(function (t) { return t.id; }), date: baseDate
+        ids: tasks.map(function (t) { return t.id; }),
+        date: weekdayScope ? tasks[0].date : baseDate
       });
     },
 
@@ -912,6 +1084,18 @@
         /* 既不是确认也不是取消（取消在上面统一处理）：多半是在纠正理解。
            撤掉待确认，把这句话当新指令重放一遍，省得用户照着原话再打一次。
            echo:false 因为这条消息已经上过屏了 */
+        this.pending = null;
+        this.handle(text, { echo: false });
+        return;
+      }
+
+      if (pend.type === 'confirm-bulk-update' || pend.type === 'confirm-bulk-delete') {
+        if (/^(确认|确定|是|对|好|好的|嗯|y|yes|继续|执行|可以|ok)$/i.test(text)) {
+          if (pend.type === 'confirm-bulk-update') this.commitBulkUpdate(pend);
+          else this.commitBulkDelete(pend);
+          return;
+        }
+        // 既不是确认也不是取消：多半是在纠正条件，撤掉待确认后按新指令重放
         this.pending = null;
         this.handle(text, { echo: false });
         return;
@@ -1088,7 +1272,7 @@
         App.util.parseDateStr(termMonday).getDay()];
       var note = '识别为课表：' + timetable.length + ' 门课。' +
         '学期第 1 周按 <b>' + termMonday + '</b>（' + week + '，' +
-        (termSource === 'saved' ? '上次用过的值' : '按课表打印日期推断') +
+        (termSource === 'saved' ? '上次用过的值' : '按课表信息推断') +
         '）计算；如果不对，直接回复正确的第 1 周周一日期（YYYY-MM-DD），我会重新算。';
 
       if (result.fatal) {

@@ -315,8 +315,34 @@
     return { date: d, spans: spans, fromMin: fromMin, toMin: toMin, windowLabel: windowLabel };
   }
 
+  /* 「每周一」「所有周一」「周一都…」：按星期聚合查询，而不是只看最近那个周一。
+     「下周一」「这周一」仍是具体日期，不在此列 */
+  function queryWeekdayScope(text) {
+    var re = /(下个|下|这|本|每(?:个|周)?|所有|全部|各个|每一?)?\s*(?:星期|礼拜|周)([一二三四五六日天])/g;
+    var m;
+    while ((m = re.exec(text))) {
+      var prefix = m[1] || '';
+      // 「下周一 / 这周一」是具体日期，即使后面带「都」也不聚合
+      if (/^(下个|下|这|本)$/.test(prefix)) continue;
+
+      var agg = /^(每|所有|全部|各个|每一)/.test(prefix);
+      var tailStart = m.index + m[0].length;
+      var tail = text.slice(tailStart, tailStart + 10);
+      var k = tail.indexOf('都');
+      // 中间可以隔「的课」「上午」这类词，但不跨标点
+      var tailHit = k >= 0 && !/[，。,.！!？?]/.test(tail.slice(0, k));
+      if (!agg && !tailHit) continue;
+
+      var end = m.index + m[0].length;
+      if (tailHit) end = tailStart + k + 1;
+      return { weekday: WD[m[2]], start: m.index, end: end };
+    }
+    return null;
+  }
+
   function parseQuery(text, today, nowMs) {
     var win = parseQueryWindow(text, today, nowMs);
+    var wdScope = queryWeekdayScope(text);
     var date = win.date ? win.date.date : today;
     var t1 = findTime(text);
     if (t1 && t1.nextDay && !win.date) date = util.addDaysStr(date, 1);
@@ -327,8 +353,11 @@
       : null;
     var spans = win.spans.slice();
     if (catM) spans.push({ start: catM.index, end: catM.index + catM[0].length });
+    if (wdScope) spans.push({ start: wdScope.start, end: wdScope.end });
 
-    var titleFrag = cleanQueryTitle(stripSpans(text, spans)) || null;
+    var rawTitle = cleanQueryTitle(stripSpans(text, spans)) || null;
+    // 「周一的课都有哪些」里的「课」不是标题，是在问整天的安排
+    var titleFrag = rawTitle && !GENERIC_TITLE_RE.test(rawTitle) ? rawTitle : null;
     var askEta = /(还有多久|还有多长时间|还剩多久|还要多久)/.test(text);
     var next = /(下一项|下一个|下一次|下一场)/.test(text);
     var hasRemaining = /(还有|还剩|剩下|剩余|接下来|下一项|下一个|下一次|之后|以后|后面)/.test(text);
@@ -345,7 +374,8 @@
       startTime: null, endTime: null, title: null,
       category: null, target: null, patches: null,
       query: {
-        scope: win.date ? 'date' : 'today',
+        scope: wdScope ? 'weekday' : (win.date ? 'date' : 'today'),
+        weekday: wdScope ? wdScope.weekday : null,
         remainingOnly: remainingOnly,
         fromMin: win.fromMin,
         toMin: win.toMin,
@@ -423,6 +453,273 @@
      本功能源日保留，想移动请用「挪到」。 */
   var COPY_WORD_RE = /(复制|拷贝|抄到)/;
   var COPY_SPLIT_RE = /(复制到|拷贝到|抄到|复制至|拷贝至)/;
+
+  /* ---------------- 批量修改 / 删除 ----------------
+     「都 / 所有 / 每」这类范围词触发批量语义；改名天然按整门课处理。
+     批量句先在这里解析，接不住再退回后面的单条分支。 */
+
+  var WD_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  var BULK_WORD_RE = /(所有|全部|全都|都|每(?:个|周|一)?|各个|各|凡是|一律|统统)/;
+  var RENAME_RE = /(改名成|改名为|重命名为|更名为|名字改成|名称改成|改称为?|改叫)/;
+  var BULK_MOVE_RE = /(改放到|移动到|搬到|移到|挪到|调整到|调整成|调整为|改成|改为|换成|换到|改到|调整|放到)/;
+  var BULK_SHIFT_RE = /(往后挪|向后挪|延后|推迟|提前|往前挪|向前挪)/;
+  var SAME_TIME_RE = /(相同的时间段?|同一时间(?:段)?|同一个?时间段?|原时间|原来的时间)/;
+  var BULK_UPDATE_RE = /(改|挪|调整|换|移|放)/;
+  var GENERIC_TITLE_RE = /^(?:课|课程|课表|安排|日程|任务|计划|内容|事项|东西|一切|全部|所有)$/;
+
+  function isBulkEdit(text) {
+    if (RENAME_RE.test(text)) return true;
+    if (BULK_SHIFT_RE.test(text) && BULK_WORD_RE.test(text)) return true;
+    if (SAME_TIME_RE.test(text) && /(?:星期|礼拜|周)[一二三四五六日天]/.test(text) &&
+        BULK_UPDATE_RE.test(text)) {
+      return true;
+    }
+    return BULK_WORD_RE.test(text) &&
+      (BULK_UPDATE_RE.test(text) || DELETE_RE.test(text));
+  }
+
+  /* 周一为一周起点 */
+  function mondayOf(dateStr) {
+    var d = util.parseDateStr(dateStr);
+    return util.addDaysStr(dateStr, -((d.getDay() + 6) % 7));
+  }
+
+  /* 批量句的标题清洗：去掉「所有 / 都 / 的安排 / 把」等范围词与结构词 */
+  function cleanBulkTitle(raw) {
+    var t = String(raw || '');
+    t = t.replace(/[「『“‘"']/g, '').replace(/[」』”’"']/g, '');
+    t = t.replace(/[，,。.！!？?、；;：:]/g, ' ');
+    t = t.replace(/^(?:请|帮我|麻烦你?|给我|把|将|让|对|我想|我要|想要|需要)+/g, '');
+    t = t.replace(/(?:所有|全部|全都|凡是|每一个|每个|每一|各个|各|一律|统统)/g, ' ');
+
+    // 首尾的结构词可能层层嵌套（「将安排中…的安排都」），反复剥到稳定为止
+    var prev;
+    do {
+      prev = t;
+      t = t.replace(/\s+/g, ' ').trim();
+      t = t.replace(/^(?:安排中|日程中|计划中|安排里|日程里|计划里|的|中|里)+/, '');
+      t = t.replace(/(?:的?(?:安排|日程|任务|计划|内容|事项)|都|全部|所有|全都|一律|的|中|里)+$/, '');
+    } while (t !== prev);
+    return t.trim();
+  }
+
+  /* 新标题只做最基本的清洗，保留用户写下的词（包括「所有」这类字眼） */
+  function cleanNewTitle(raw) {
+    return String(raw || '')
+      .replace(/[「『“‘"']/g, '')
+      .replace(/[」』”’"']/g, '')
+      .replace(/^\s*(?:为|成|作|叫)\s*/, '')
+      .replace(/[，,。.；;、]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /* 从左边（动作词之前）提取定位条件：星期 / 日期 / 区间 / 标题 / 时间。
+     批量语境里裸「周一」表示「每周一」；「下周一」「这周一」仍是具体日期 */
+  function fillTarget(target, seg, today) {
+    var text = String(seg || '');
+    var spans = [];
+    var m;
+    var wdRe = /(下个|下|这|本|每(?:个|周)?|所有|全部|各个)?\s*(?:星期|礼拜|周)([一二三四五六日天])/g;
+
+    while ((m = wdRe.exec(text))) {
+      spans.push({ start: m.index, end: m.index + m[0].length });
+      var prefix = m[1] || '';
+      if (/^(下个|下|这|本)$/.test(prefix)) {
+        var fd = findDate(m[0], today);
+        if (fd) target.date = fd.date;
+      } else {
+        target.weekday = WD[m[2]];
+      }
+    }
+    var rest = stripSpans(text, spans);
+
+    // 「这周 / 下周」：整个自然周的范围（周一到周日）
+    var rangeM = /(这|本|下)(?:个)?(?:周|星期|礼拜)/.exec(rest);
+    if (rangeM) {
+      var mon = mondayOf(today);
+      if (rangeM[1] === '下') mon = util.addDaysStr(mon, 7);
+      target.dateFrom = mon;
+      target.dateTo = util.addDaysStr(mon, 6);
+      rest = rest.slice(0, rangeM.index) + ' ' +
+        rest.slice(rangeM.index + rangeM[0].length);
+    }
+
+    var d = findDate(rest, today);
+    if (d) {
+      target.date = d.date;
+      rest = stripSpans(rest, [d]);
+    }
+    var t = findTime(rest);
+    if (t) {
+      target.startTime = util.minToHm(t.h * 60 + t.m);
+      rest = stripSpans(rest, [t]);
+    }
+
+    var title = cleanBulkTitle(rest);
+    if (title && !GENERIC_TITLE_RE.test(title)) target.titleFrag = title;
+
+    // 只有范围词、没写具体对象：允许匹配同一范围里的全部任务
+    target.matchAll = !target.titleFrag && target.weekday == null && !target.date &&
+      !target.dateFrom && BULK_WORD_RE.test(text);
+    return target;
+  }
+
+  function newTarget() {
+    return { weekday: null, date: null, dateFrom: null, dateTo: null,
+             titleFrag: null, startTime: null, matchAll: false };
+  }
+
+  function hasSpecific(t) {
+    return !!t.titleFrag || t.weekday != null || !!t.date || !!t.dateFrom;
+  }
+
+  /* 改名句的右侧：取新标题，并把「并改放到…」之类的后续动作留下 */
+  function extractRenameValue(right) {
+    var rest = String(right || '').replace(/^\s*(?:为|成|作|叫)\s*/, '');
+    var q = /^\s*[「『“‘"']([\s\S]*?)[」』”’"']/.exec(rest);
+    if (q) {
+      return { value: q[1].trim(), rest: rest.slice(q[0].length) };
+    }
+
+    // 没加引号：值到下一个动作 / 连接词为止
+    var a = /(?:并|同时|然后|再|并且|，|,|；|;)\s*(?=改放到|改到|改成|改为|换成|换到|挪到|移动到|移到|搬到|调整|放到|删掉|删除|取消)/.exec(rest);
+    var value = a ? rest.slice(0, a.index) : rest;
+    var tail = a ? rest.slice(a.index) : '';
+
+    // 「新名字改放到周三」中间没有连接词时，直接在这里切开
+    var mv = /(?:改放到|改到|改成|改为|换成|换到|挪到|移动到|移到|搬到|调整到|调整成|调整为)/.exec(value);
+    if (mv) {
+      tail = value.slice(mv.index) + tail;
+      value = value.slice(0, mv.index);
+    }
+    value = cleanNewTitle(value);
+    return { value: value, rest: tail };
+  }
+
+  /* 移动动作的右侧：目标星期 / 日期 / 新开始时间 */
+  function parseMoveDestination(right, today) {
+    var out = {};
+    var wm = /(下个|下|这|本|每(?:个|周)?|所有|全部|各个)?\s*(?:星期|礼拜|周)([一二三四五六日天])/.exec(right);
+    if (wm) {
+      out.weekday = WD[wm[2]];
+    } else {
+      var d = findDate(right, today);
+      if (d) out.date = d.date;
+    }
+    var t = findTime(right);
+    if (t) out.startTime = util.minToHm(t.h * 60 + t.m);
+    return out;
+  }
+
+  function parseBulkDelete(text, dm, today) {
+    var left = text.slice(0, dm.index);
+    var right = text.slice(dm.index + dm[0].length);
+    var lt = fillTarget(newTarget(), left, today);
+    var rt = fillTarget(newTarget(), right, today);
+
+    var target;
+    if (hasSpecific(lt)) target = lt;
+    else if (hasSpecific(rt)) target = rt;
+    else target = lt.matchAll ? lt : (rt.matchAll ? rt : null);
+    if (!target) return null;
+
+    return {
+      ok: true, intent: 'delete', bulk: true,
+      date: target.date || today,
+      targetDate: target.date || today,
+      startTime: target.startTime,
+      endTime: null,
+      title: target.titleFrag || null,
+      category: null,
+      target: target,
+      patches: null, query: null,
+      includeDone: true,
+      defaultsUsed: []
+    };
+  }
+
+  function parseBulkEdit(text, today) {
+    var rm = RENAME_RE.exec(text);
+    var dm = DELETE_RE.exec(text);
+    var moveM = BULK_MOVE_RE.exec(text);
+    var shiftM = BULK_SHIFT_RE.exec(text);
+
+    // 删除语义独占（改名 + 删除混在一句里不猜）
+    if (dm && !rm && !moveM && !shiftM) return parseBulkDelete(text, dm, today);
+
+    var targetSeg, renamePart = null, rest = text;
+    if (rm) {
+      targetSeg = text.slice(0, rm.index);
+      renamePart = extractRenameValue(text.slice(rm.index + rm[0].length));
+      if (!renamePart || !renamePart.value) return null;
+      rest = renamePart.rest;
+    } else if (shiftM) {
+      targetSeg = text.slice(0, shiftM.index);
+      rest = text.slice(shiftM.index);
+    } else if (moveM) {
+      targetSeg = text.slice(0, moveM.index);
+      rest = text.slice(moveM.index + moveM[0].length);
+    } else {
+      return null;
+    }
+
+    var target = fillTarget(newTarget(), targetSeg, today);
+    if (!hasSpecific(target) && !target.matchAll) return null;
+
+    var patches = {};
+    if (renamePart) patches.title = cleanNewTitle(renamePart.value);
+
+    // 移动 / 改时间
+    var moveText = null;
+    if (rm) {
+      var rm2 = BULK_MOVE_RE.exec(rest);
+      if (rm2) moveText = rest.slice(rm2.index + rm2[0].length);
+    } else if (moveM) {
+      moveText = text.slice(moveM.index + moveM[0].length);
+    }
+
+    if (moveText != null) {
+      var dest = parseMoveDestination(moveText, today);
+      if (dest.weekday != null) patches.weekday = dest.weekday;
+      if (dest.date) patches.date = dest.date;
+      if (dest.startTime) patches.startTime = dest.startTime;
+
+      var dur = findDuration(moveText);
+      if (dur && !BULK_SHIFT_RE.test(moveText)) patches.durationMin = dur.min;
+
+      if (dest.weekday == null && !dest.date && !dest.startTime && !dur &&
+          !SAME_TIME_RE.test(moveText)) {
+        return null;
+      }
+    }
+
+    // 提前 / 延后 N 分钟
+    var shiftIn = rm ? rest : (shiftM ? text : '');
+    var sm = BULK_SHIFT_RE.exec(shiftIn);
+    if (sm) {
+      var after = shiftIn.slice(sm.index + sm[0].length);
+      var sd = findDuration(after);
+      if (sd) {
+        var sign = /^(提前|往前挪|向前挪)$/.test(sm[1]) ? -1 : 1;
+        patches.timeDeltaMin = sign * sd.min;
+      }
+    }
+
+    if (!Object.keys(patches).length) return null;
+
+    return {
+      ok: true, intent: 'update', bulk: true,
+      date: today, targetDate: today,
+      startTime: null, endTime: null,
+      title: target.titleFrag || null,
+      category: classify(target.titleFrag || text).category,
+      target: target,
+      patches: patches,
+      includeDone: /(包括已完成|连同已完成|已完成也|历史的也|连历史)/.test(text),
+      query: null, defaultsUsed: []
+    };
+  }
 
   var EX = {
     add: ['明天下午两点半上英语课', '晚上七点有个会议', '后天9点到11点数学复习'],
@@ -560,6 +857,14 @@
         };
       }
 
+      /* --- 0.5 批量修改 / 删除：所有、都、每、改名 … ---
+         先于单条分支：「都改到」里的「改到」也会被下面的通用修改分支看到，
+         不先接住就会退化成「改下周一这一条」 */
+      if (isBulkEdit(text)) {
+        var bulkIntent = parseBulkEdit(text, today);
+        if (bulkIntent) return bulkIntent;
+      }
+
       /* --- 1. 修改句：把 X 改成 Y（「把」可省略） --- */
       var split = UPDATE_SPLIT_RE.exec(text);
       if (split) {
@@ -590,7 +895,7 @@
         if (patchMin != null) patches.startTime = util.minToHm(patchMin);
         if (dur) patches.durationMin = dur.min;
 
-        if (patches.date || patches.startTime) {
+        if (patches.date || patches.startTime || patches.durationMin) {
           return {
             ok: true, intent: 'update',
             date: pDate ? pDate.date : (tDate ? tDate.date : today),

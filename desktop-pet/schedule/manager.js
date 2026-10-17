@@ -78,12 +78,23 @@
       });
     },
 
-    /* 删/改时的候选定位：日期内按标题片段或开始时间匹配 */
+    /* 删/改时的候选定位：日期 / 星期 / 日期区间 + 标题片段 + 开始时间
+       q.weekday 用 0–6（周日 = 0），q.dateFrom / q.dateTo 是闭区间。
+       这里不按状态过滤：单条删除要能删到已完成的，批量修改由调用方决定是否跳过已完成 */
     findCandidates: function (q) {
+      q = q || {};
       var pool = q.date ? this.tasksOfDate(q.date) : this.tasks.slice();
+      function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+      var frag = norm(q.titleFrag);
       return pool.filter(function (t) {
-        var hitTitle = !q.titleFrag ||
-          t.title.indexOf(q.titleFrag) >= 0 || q.titleFrag.indexOf(t.title) >= 0;
+        if (q.weekday != null) {
+          var d = util.parseDateStr(t.date);
+          if (!d || d.getDay() !== q.weekday) return false;
+        }
+        if (q.dateFrom && t.date < q.dateFrom) return false;
+        if (q.dateTo && t.date > q.dateTo) return false;
+        var title = norm(t.title);
+        var hitTitle = !frag || title.indexOf(frag) >= 0 || frag.indexOf(title) >= 0;
         var hitTime = !q.startTime || t.startTime === q.startTime;
         return hitTitle && hitTime;
       }).sort(function (a, b) {
@@ -127,8 +138,10 @@
       return { task: task, warning: task.status === 'done' ? 'past' : null };
     },
 
-    /* ---- 修改：patches {date?, startTime?}；改开始时间则保持原时长平移 ---- */
+    /* ---- 修改：patches {date?, startTime?, durationMin?, title?, category?} ----
+       改开始时间默认保持原时长；显式给 durationMin 时按新时长重算结束时间 */
     update: function (id, patches) {
+      patches = patches || {};
       var t = this.get(id);
       if (!t) return null;
       var oldDate = t.date;
@@ -136,11 +149,14 @@
       if (patches.date && util.parseDateStr(patches.date)) {
         t.date = patches.date;
       }
-      if (patches.startTime) {
-        var newStart = util.hmToMin(patches.startTime);
+      var durOverride = patches.durationMin > 0 ? patches.durationMin : null;
+      var newStart = patches.startTime ? util.hmToMin(patches.startTime) : null;
+      if (newStart != null || durOverride) {
+        if (newStart == null) newStart = util.hmToMin(t.startTime);
+        if (newStart == null) newStart = 0;
         var oldStart = util.hmToMin(t.startTime);
         var oldEnd = util.hmToMin(t.endTime) + (t.endOffset || 0) * 1440;
-        var duration = Math.max(15, oldEnd - oldStart);
+        var duration = durOverride || Math.max(15, oldEnd - oldStart);
         var newEnd = newStart + duration;
         t.startTime = util.minToHm(newStart);
         t.endTime = util.minToHm(newEnd);
@@ -156,6 +172,182 @@
       this.resetSummary(t.date);
       this.changed();
       return t;
+    },
+
+    /* ---- 批量修改：先把每条的目标状态算好，再一次性落库 ----
+       patches:
+         title / category   直接覆盖
+         weekday            0–6，按「同一自然周」移到目标星期（周一为一周起点）；
+                            待办任务如果会落到今天之前，就顺延一周
+         startTime          统一开始时间，各自保持原时长
+         durationMin        统一时长，各自保持原开始时间
+         timeDeltaMin       整体平移分钟数（正数延后、负数提前，可跨天）
+         date               统一日期（批量下会堆到同一天，调用方需先确认）
+       返回 {updated, moved, renamed, retimed, newConflicts} */
+    updateMany: function (ids, patches) {
+      patches = patches || {};
+      var self = this;
+      var idMap = {};
+      (ids || []).forEach(function (id) { idMap[id] = true; });
+
+      var today = App.Clock.today();
+      var beforePairs = this._overlapPairs();
+      var plans = [];
+
+      this.tasks.forEach(function (t) {
+        if (!idMap[t.id]) return;
+
+        var plan = {
+          task: t,
+          date: t.date,
+          start: t.startTime,
+          end: t.endTime,
+          endOffset: t.endOffset || 0,
+          title: t.title,
+          category: t.category
+        };
+
+        var curStartMin = util.hmToMin(t.startTime);
+        var curEndMin = util.hmToMin(t.endTime) + (t.endOffset || 0) * 1440;
+        var duration = Math.max(15, curEndMin - curStartMin);
+
+        if (patches.weekday != null) {
+          var day = util.parseDateStr(t.date);
+          if (day) {
+            // 周一 = 0 … 周日 = 6：按自然周换算，避免把第 3 周的课挪到第 4 周
+            var curIdx = (day.getDay() + 6) % 7;
+            var targetIdx = (patches.weekday + 6) % 7;
+            var dest = util.addDaysStr(t.date, targetIdx - curIdx);
+            // 待办任务不能因为往回移而落到过去；同一周放不下就顺延一周
+            if (dest < today) dest = util.addDaysStr(dest, 7);
+            plan.date = dest;
+          }
+        }
+        if (patches.date && util.parseDateStr(patches.date)) plan.date = patches.date;
+
+        var startMin = curStartMin;
+        var dayShift = 0;
+        if (patches.timeDeltaMin) {
+          startMin = curStartMin + patches.timeDeltaMin;
+          dayShift = Math.floor(startMin / 1440);
+          startMin = ((startMin % 1440) + 1440) % 1440;
+        }
+        if (patches.startTime != null && util.hmToMin(patches.startTime) != null) {
+          startMin = util.hmToMin(patches.startTime);
+          dayShift = 0;
+        }
+        if (patches.durationMin > 0) duration = patches.durationMin;
+
+        if (patches.timeDeltaMin || patches.startTime != null || patches.durationMin > 0) {
+          plan.date = util.addDaysStr(plan.date, dayShift);
+          var endMin = startMin + duration;
+          plan.start = util.minToHm(startMin);
+          plan.end = util.minToHm(endMin);
+          plan.endOffset = Math.floor(endMin / 1440);
+        }
+
+        if (patches.title) plan.title = String(patches.title).trim();
+        if (patches.category) plan.category = patches.category;
+        plans.push(plan);
+      });
+
+      /* 周期规则：改星期后同步 dateRule，让 materializeRules 继续按新星期展开。
+         materializeRules 以 updatedAt 最新的一条为模板，这次批量改到的任务会成为模板 */
+      var weekdayRule = null;
+      if (patches.weekday != null) {
+        weekdayRule = '周' + '日一二三四五六'.charAt(patches.weekday);
+      }
+
+      var now = App.Clock.now();
+      var touched = {};
+      var stats = { updated: 0, moved: 0, renamed: 0, retimed: 0, newConflicts: 0 };
+
+      plans.forEach(function (p) {
+        var t = p.task;
+        if (p.date !== t.date) stats.moved++;
+        if (p.title !== t.title) stats.renamed++;
+        if (p.start !== t.startTime || p.end !== t.endTime ||
+            (p.endOffset || 0) !== (t.endOffset || 0)) stats.retimed++;
+
+        touched[t.date] = true;
+        touched[p.date] = true;
+        t.date = p.date;
+        t.startTime = p.start;
+        t.endTime = p.end;
+        t.endOffset = p.endOffset || 0;
+        t.title = p.title;
+        t.category = p.category;
+        if (weekdayRule && t.ruleId) t.dateRule = weekdayRule;
+        t.updatedAt = now;
+        t.status = util.taskEndMs(t) <= now ? 'done' : 'pending';
+        stats.updated++;
+      });
+
+      if (stats.updated) {
+        // 批量改动可能把原本不重叠的安排挪到一起：只有新出现的重叠对才值得提醒
+        var afterPairs = this._overlapPairs();
+        Object.keys(afterPairs).forEach(function (k) {
+          if (!beforePairs[k]) stats.newConflicts++;
+        });
+        Object.keys(touched).forEach(function (d) { self.resetSummary(d); });
+        this.changed();
+      }
+      return stats;
+    },
+
+    /* 同日未完成任务的重叠对，键是排序后的「idA|idB」。只用于批量修改前后对比 */
+    _overlapPairs: function () {
+      var byDate = {};
+      this.tasks.forEach(function (t) {
+        if (t.status === 'done') return;
+        (byDate[t.date] || (byDate[t.date] = [])).push(t);
+      });
+      var out = {};
+      Object.keys(byDate).forEach(function (d) {
+        var list = byDate[d];
+        for (var i = 0; i < list.length; i++) {
+          var a = list[i];
+          var as = util.hmToMin(a.startTime);
+          var ae = util.hmToMin(a.endTime) + (a.endOffset || 0) * 1440;
+          for (var j = i + 1; j < list.length; j++) {
+            var b = list[j];
+            var bs = util.hmToMin(b.startTime);
+            var be = util.hmToMin(b.endTime) + (b.endOffset || 0) * 1440;
+            if (as < be && bs < ae) {
+              out[a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id] = true;
+            }
+          }
+        }
+      });
+      return out;
+    },
+
+    /* ---- 批量删除：一次 suppress、一次持久化 ----
+       返回真正删掉的条数 */
+    removeMany: function (ids) {
+      var self = this;
+      var idMap = {};
+      (ids || []).forEach(function (id) { idMap[id] = true; });
+      var touched = {};
+      var removed = 0;
+      var kept = [];
+
+      this.tasks.forEach(function (t) {
+        if (!idMap[t.id]) { kept.push(t); return; }
+        if (t.ruleId) {
+          var key = t.ruleId + '@' + t.date;
+          if (self.meta.suppressed.indexOf(key) < 0) self.meta.suppressed.push(key);
+        }
+        touched[t.date] = true;
+        removed++;
+      });
+      this.tasks = kept;
+
+      if (removed) {
+        Object.keys(touched).forEach(function (d) { self.resetSummary(d); });
+        this.changed();
+      }
+      return removed;
     },
 
     remove: function (id) {
@@ -196,7 +388,11 @@
 
       var rules = Object.create(null);
       this.tasks.forEach(function (t) {
-        if (t.ruleId && !rules[t.ruleId]) {
+        if (!t.ruleId) return;
+        var cur = rules[t.ruleId];
+        /* 以最近更新的一条为模板：批量改标题 / 时间 / 星期后，
+           后续展开会沿用新值，而不是抱着最早那条旧记录不放 */
+        if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) {
           rules[t.ruleId] = t;
         }
       });
