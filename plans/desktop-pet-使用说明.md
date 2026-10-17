@@ -735,6 +735,19 @@ desktop-pet/
 
 两个生成器都写在 `tools/` 下，`npm run` 从仓库根目录执行即可，不必 `cd` 进任何子目录。
 
+### 别人下载仓库后（复刻清单）
+
+| 想做什么 | 需要什么 |
+| --- | --- |
+| 只用应用 | 克隆 / 下载 zip → 双击 `desktop-pet/index.html`，什么都不用装 |
+| 跑测试 / 生成模板 PDF 和 CMap | 仓库根目录 `npm install`（按 `package-lock.json` 锁定版本装 `pdfkit`、`pdfjs-dist`，仅开发侧用） |
+| 处理视频素材 | `pip install numpy opencv-python-headless scipy` + 一个 ffmpeg。脚本按 `--ffmpeg` → 环境变量 `FFMPEG` → `tools/video/ffmpeg.exe` → `PATH` → `imageio-ffmpeg` 的顺序自动找，详见 [tools/video/README.md](../tools/video/README.md) |
+| 打包形象包 | 只需 Python 标准库，`char_pack.py` 零额外依赖 |
+
+仓库不上传的东西都已在 `.gitignore` 里，且都能重建或自备：`node_modules/`（`npm install` 重建）、
+`tools/video/ffmpeg.exe`（约 84MB，自备或走 PATH / imageio-ffmpeg）、`_backup_*/` 与
+`new_video/processed/`（临时产物，可再生成）。所以从 GitHub 下载到的仓库本身就是完整、可复刻的。
+
 ---
 
 ## 十五、使用建议
