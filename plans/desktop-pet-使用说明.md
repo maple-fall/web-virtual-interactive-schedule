@@ -663,7 +663,7 @@ node tests/test-llm.js               # 本地大模型接入层（fetch 全打�
 每个脚本末尾都会打印 `N 通过 / M 失败`，`M` 为 0 就算过。
 
 `test-timetable-import.js` 和 `e2e-pdf-import.js` 里的课表识别用例依赖样本
-`data/梁浩贤(2026-2027-1)课表.pdf`（带姓名学号的个人课表）。文件不在时这两处会打印「跳过」，
+`data/xxx课表.pdf`（带姓名学号的个人课表）。文件不在时这两处会打印「跳过」，
 只跑其余用例、**不报错**——但也意味着课表识别那部分没被验证。要恢复覆盖，
 把教务系统导出的同名文件放回 `data/` 即可。
 
@@ -709,7 +709,7 @@ desktop-pet/
 ├── data/
 │   ├── schedule_template.pdf      「下载模板」下载的模板（一次生成，静态文件）
 │   ├── schedule_template.csv      同一份模板的 CSV 版本，格式参考用
-│   ├── 梁浩贤(2026-2027-1)课表.pdf  教务系统导出的网格课表样本（课表导入的测试用例）
+│   ├── xxx课表.pdf  教务系统导出的网格课表样本（课表导入的测试用例）
 │   ├── backgrounds/bg1.jpg        舞台背景预设
 │   └── wallpapers/wall1.jpg       界面壁纸预设
 └── videos/                        角色动画素材

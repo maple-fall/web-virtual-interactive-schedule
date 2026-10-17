@@ -1,6 +1,6 @@
 /*
  * 无头测试：验证「教务系统网格课表 PDF → 日程」的解析与展开
- * 样本：desktop-pet/data/梁浩贤(2026-2027-1)课表.pdf（90° 旋转的星期×节次网格，
+ * 样本：desktop-pet/data/xxx课表.pdf（90° 旋转的星期×节次网格，
  *       STSong-Light 标准字体、无内嵌 ToUnicode，必须靠内置 CMap 才提得出文字）
  * 覆盖：CMap 提取、跨页续接、单双周、折行标题、场地写进 title、节次→时间映射、
  *       学期起始日推断、过去课程过滤，以及「模板 PDF 不走课表分支」的回归。
@@ -23,7 +23,7 @@ try {
 }
 
 const ROOT = path.join(__dirname, '..', 'desktop-pet');
-const TT_PDF = path.join(ROOT, 'data', '梁浩贤(2026-2027-1)课表.pdf');
+const TT_PDF = path.join(ROOT, 'data', 'xxx课表.pdf');
 const TPL_PDF = path.join(ROOT, 'data', 'schedule_template.pdf');
 
 const sandbox = {};

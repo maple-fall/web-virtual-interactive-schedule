@@ -13,7 +13,7 @@ const ROOT = path.join(__dirname, '..', 'desktop-pet');
 const INDEX = path.join(ROOT, 'index.html');
 const PDF = path.join(ROOT, 'data', 'schedule_template.pdf');
 const CSV = path.join(ROOT, 'data', 'schedule_template.csv');
-const TIMETABLE = path.join(ROOT, 'data', '梁浩贤(2026-2027-1)课表.pdf');
+const TIMETABLE = path.join(ROOT, 'data', 'xxx课表.pdf');
 // 浏览器路径：优先环境变量，再按常见位置找（避免硬编码到某台机器）
 function findBrowser() {
   const candidates = [
@@ -375,9 +375,9 @@ function pageScript(pdfB64, csvText, foreignB64, timetableB64) {
     check('表格外的说明文字没被当成任务',
       !r.foreignTitles.some(t => /说明文字|应该被忽略|课表/.test(t)));
 
-    console.log('\n=== 7. 教务系统网格课表（梁浩贤课表，需内置 CMap）===');
+    console.log('\n=== 7. 教务系统网格课表（xxx 课表，需内置 CMap）===');
     if (!timetableB64) {
-      console.log('  ~ 跳过：data/梁浩贤(2026-2027-1)课表.pdf 不在仓库（个人课表），' +
+      console.log('  ~ 跳过：data/xxx课表.pdf 不在仓库（个人课表），' +
         '放回同名文件即恢复');
     } else {
     check('选完文件直接进待确认（不再问学期日期）', r.ttPending);
