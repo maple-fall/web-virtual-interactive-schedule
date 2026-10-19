@@ -31,6 +31,7 @@
 | [十七](#十七查询增强与画中画计划栏) | 查询增强 + 画中画计划栏 + 资源整理 | 「后天12:00后」「英语课还有多久」「下一项」等查询可用；画中画小窗底部带今起三天的计划栏；清掉可再生成与重复的 9.2MB |
 | [十八](#十八课表样本匿名化与横向表格支持) | 课表样本匿名化 + 横向表格 | 识别 WPS / Excel 导出的常规课表；学年学期表头可推断第 1 周 |
 | [十九](#十九批量增删改查按星期--标题定位) | 批量增删改查 | 按「星期 + 标题」批量换天 / 改时间 / 平移 / 改名 / 删除，先确认后执行；新增按星期聚合查询 |
+| [二十](#二十图片库文件夹同步) | 背景/壁纸图片库 | 手动放图即可见；导入图片写入 `data/backgrounds/`、`data/wallpapers/`；FSA / 本地服务器 / 浏览器兜底三种后端 |
 
 ---
 
@@ -1850,3 +1851,60 @@ body { display: flex; flex-direction: column; }
 - 新增 `tests/test-bulk-edit.js`（46 条）：两句原话的解析与端到端确认、批量改时间 / 平移 /
   删除、已完成跳过、按星期查询、单条修改不回归、`durationMin`。
 - `test-timetable-import.js` 恢复 35/0；`npm test` 现在 **12 个套件 / 693 条断言**，全绿。
+
+---
+
+## 二十、图片库（文件夹同步）
+
+### 问题
+
+用户把新图放进 `data/backgrounds/`、`data/wallpapers/` 后，面板里看不到；用「本地图片…」
+导入的图只变成 data URL 写进 `desktop_pet_settings`，从不落到这两个文件夹。
+
+根因不是漏了配置，而是运行方式：双击打开时页面是 `file://`，浏览器既不能枚举目录，
+也不能静默写盘。`settings.js` 里那两行「新增图片时同法追加」的注释，实际上是把
+「浏览器限制」转嫁给了用户。
+
+### 做法
+
+新增 `desktop-pet/imageLib.js`（`App.ImageLib`），对上层暴露一套图片库 API，
+内部按优先级选择后端：
+
+| 模式 | 触发条件 | 列表 | 写入 |
+| --- | --- | --- | --- |
+| `server` | HTTP 页面且 `GET api/images` 返回带 `desktop-pet-images` 标记的 JSON | 服务端扫描 | `POST api/images/<folder>/<name>` |
+| `fsa` | `file://` 且存在 `showDirectoryPicker` | `FileSystemDirectoryHandle` 遍历 | `createWritable()` |
+| `none` | 其余情况 | 空 | 退回 data URL |
+
+关键点：
+
+- **FSA 只在 `file://` 下启用。** HTTP 托管时用户授权的本地目录和页面 URL 不是同一份文件，
+  写进去也加载不出来，硬做只会让人困惑；这种场景提示用 `npm run serve`。
+- **句柄存 IndexedDB**（新库 `desktop_pet_images`，键 `dataDir`），启动时只 `queryPermission`，
+  绝不自动 `requestPermission`（需要用户手势）。权限过期时面板给「重新授权」。
+- **路径存原始相对路径，写 CSS 时才逐段 `encodeURIComponent`。** 中文、空格、`#`、`%`
+  都不会截断 `url()`；设置里也不再塞 base64。
+- **导入命名**：原文件名清洗后加 `-YYYYMMDD-HHMMSS.jpg`；服务端与 FSA 都做重名后缀
+  （`-2`、`-3`…），FSA 端先探测文件是否存在。
+- **迁移**：授权/服务器就绪后，仍以 data URL 存着的背景/壁纸会自动写入文件夹并改成路径；
+  目录里已删除的动态选择会在一次成功扫描后被清空（扫描失败时绝不清）。
+- **服务器**：`tools/serve-desktop-pet.js`，零依赖，以 `desktop-pet/` 为根。
+  `GET api/images` 列目录，`POST api/images/<folder>/<name>` 只收 JPEG（校验魔数 + 10MB 上限）。
+  静态文件支持单段 `Range`（视频需要 206）；路径逐段解码、拒绝 `..`/反斜杠/NUL，
+  `resolve` 后必须仍在根内。默认只绑 `127.0.0.1`，写接口校验 `Origin` 同源。
+- **测试**：`tests/test-image-lib.js`（59 条，fake IDB / fake FSA / fetch 打桩）和
+  `tests/test-image-server.js`（33 条，临时根目录 + 随机端口）。两个套件零依赖，
+  没有 `node_modules` 也能跑。
+
+### 验证
+
+- `npm test`：图片两个新套件全绿；原有 `test-stage-background` / `test-wallpaper` /
+  `test-llm` 断言不变（不加载 `imageLib.js` 时自动退回旧白名单）。
+- 真 Edge 端到端（临时脚本，验证后删除）：
+  - HTTP 模式识别为 `server`，面板列出 4 张图（含中文文件名），缩略图 CSS 使用编码 URL；
+  - 通过真实文件输入导入一张 JPEG，`desktop_pet_settings` 写入
+    `data/backgrounds/_tmp_import_source-<时间戳>.jpg`，文件确实落盘且魔数为 `FF D8 FF`；
+  - `file://` 下识别为 `fsa` / `needs-authorize`，面板出现「授权 data 目录…」，
+    无未捕获 JS 错误。
+- FSA 的原生目录选择框无法在无头环境自动化，用 fake handle 覆盖了扫描、写入、
+  重名、权限丢失、恢复句柄等路径；真实授权需要人工点一次确认。

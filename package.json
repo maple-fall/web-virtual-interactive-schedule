@@ -8,6 +8,9 @@
     "test:all": "node tests/run.js --all",
     "test:e2e": "node tests/e2e-pdf-import.js",
     "test:live": "node tests/test-llm-live.js",
+    "test:image": "node tests/test-image-lib.js && node tests/test-image-server.js",
+    "serve": "node tools/serve-desktop-pet.js --open",
+    "serve:lan": "node tools/serve-desktop-pet.js --host 0.0.0.0",
     "gen:pdf": "node tools/gen-schedule-pdf/gen.js",
     "gen:cmaps": "node tools/gen-schedule-pdf/gen-cmaps.js",
     "preview": "node tools/preview-template.js"

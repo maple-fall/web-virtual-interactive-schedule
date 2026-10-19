@@ -7,21 +7,24 @@
  *   wallpaper 作用于 body，是整窗底层壁纸；has-wallpaper class 让面板转半透明透出纹理
  *   llm       本地模型开关与端点，运行期的唯一事实源是 App.LLM.cfg，这里只负责落盘与面板
  *   character 当前形象：默认 videos/ 或 IndexedDB 里的形象包（含包列表的导入/导出/删除）
+ *
+ * 背景/壁纸图片不再只靠下面的硬编码清单：App.ImageLib（imageLib.js）会在
+ * file:// 下用「授权 data 目录」、在 HTTP 下用本地服务器接口，自动扫描
+ * data/backgrounds、data/wallpapers。下面的 PRESETS 只是随仓库分发的精选预设，
+ * 动态扫描到的图片会追加到面板里。
  */
 (function () {
   'use strict';
   var App = window.App;
 
-  // file:// 下无法枚举目录，预设清单硬编码；新增图片时同法追加
+  /* 随仓库分发的舞台背景精选。动态图片由 App.ImageLib 扫描得到，无需在这里追加 */
   var PRESETS = [
     { path: 'data/backgrounds/bg1.jpg', label: '紫色' }
   ];
 
-  /* 界面壁纸预设。只收 data/wallpapers/ 下的图，别把 data/backgrounds/ 的舞台背景混进来——
+  /* 界面壁纸精选。只收 data/wallpapers/ 下的图，别把 data/backgrounds/ 的舞台背景混进来——
      两者作用范围不同（见文件头注释），混放会让「换壁纸」面板里冒出背景图，用户分不清。
-     扩展流程：图片处理（裁剪，压缩到最长边 ≤1920，JPEG 质量约 0.8）后放
-     data/wallpapers/wallN.jpg → 在此追加一条。
-     注意：已保存的设置里若存的是路径，改名/删文件后 load() 因路径不在清单而自动回退为无壁纸 */
+     用户自己放进 data/wallpapers/ 的图片会由图片库自动发现，不需要改这个数组。 */
   var WALLPAPER_PRESETS = [
     { path: 'data/wallpapers/wall1.jpg', label: '中山装·人生哲理' }
   ];
@@ -77,9 +80,11 @@
     return Math.max(1, Math.round(bytes / 1024)) + ' KB';
   }
 
-  /* 校验背景/壁纸值：预设路径（白名单）或位图 data URL（拒绝 svg 等可执行格式）。
-     两者规则相同，只是预设清单不同；不在白名单的一律视为未设置 */
-  function sanitizeImageChoice(v, presets) {
+  /* 校验背景/壁纸值：预设路径、图片库扫描到的动态路径，或位图 data URL。
+     动态路径由 imageLib.js 的 isImagePath 校验（目录、扩展名、防穿越），
+     folder 参数保证背景/壁纸不会串目录；模块没加载时自动退回预设白名单。
+     不在允许范围的一律视为未设置 */
+  function sanitizeImageChoice(v, presets, folder) {
     if (typeof v !== 'string' || !v) return null;
     if (v.indexOf('data:image/') === 0) {
       if (!DATA_URL_RE.test(v) || v.length > MAX_DATA_URL_LEN) return null;
@@ -88,15 +93,26 @@
     for (var i = 0; i < presets.length; i++) {
       if (presets[i].path === v) return v;
     }
+    if (App.ImageLib && App.ImageLib.isImagePath && App.ImageLib.isImagePath(v, folder)) {
+      return v;
+    }
     return null;
   }
 
   function sanitizeBg(v) {
-    return sanitizeImageChoice(v, PRESETS);
+    return sanitizeImageChoice(v, PRESETS, 'backgrounds');
   }
 
   function sanitizeWallpaper(v) {
-    return sanitizeImageChoice(v, WALLPAPER_PRESETS);
+    return sanitizeImageChoice(v, WALLPAPER_PRESETS, 'wallpapers');
+  }
+
+  /* 设置里存原始路径；写进 CSS 前才逐段编码，避免中文/空格/# 把 url() 截断 */
+  function imageCssUrl(v) {
+    if (!v) return '';
+    if (v.indexOf('data:image/') === 0) return v;
+    if (App.ImageLib && App.ImageLib.encodePath) return App.ImageLib.encodePath(v);
+    return v;
   }
 
   /* ---------------- 本地大模型配置 ----------------
@@ -188,6 +204,8 @@
       this.applyWallpaper();
       this.bindUI();
       this.syncLlmUI();
+      // 图片库异步探测：服务器 / 目录授权 / 不可用。不阻塞启动
+      this.initImageLib();
     },
 
     /* ---- 本地大模型 ---- */
@@ -318,7 +336,7 @@
       if (!stage) return;
 
       if (this.bg) {
-        stage.style.backgroundImage = OVERLAY + 'url("' + this.bg + '")';
+        stage.style.backgroundImage = OVERLAY + 'url("' + imageCssUrl(this.bg) + '")';
         stage.classList.add('has-bg');
       } else {
         stage.style.backgroundImage = '';
@@ -341,7 +359,7 @@
 
       if (this.wallpaper) {
         body.classList.add('has-wallpaper');
-        st.backgroundImage = WALLPAPER_OVERLAY + 'url("' + this.wallpaper + '")';
+        st.backgroundImage = WALLPAPER_OVERLAY + 'url("' + imageCssUrl(this.wallpaper) + '")';
         st.backgroundSize = 'cover';
         st.backgroundPosition = 'center';
         st.backgroundRepeat = 'no-repeat';
@@ -362,7 +380,8 @@
     },
 
     select: function (path) {
-      if (PRESETS.every(function (p) { return p.path !== path; })) return;
+      // 预设和图片库扫描到的动态路径都允许；越界/跨目录路径会被 sanitizeBg 拒绝
+      if (sanitizeBg(path) !== path) return;
       if (!save({ bg: path, wallpaper: this.wallpaper })) {
         App.Output.error('背景设置保存失败，浏览器存储空间可能已满。');
         App.Bubble.say('背景没保存上，稍后再试试', { ms: 3500 });
@@ -469,40 +488,88 @@
     importBg: function (file) {
       var self = this;
       this._importImageFile(file, function (dataUrl, fail) {
-        if (!save({ bg: dataUrl, wallpaper: self.wallpaper })) {
-          fail('背景保存失败，浏览器存储空间可能已满。', '背景存不上，换张小图试试');
-          return;
-        }
-        self.bg = dataUrl;
-        self.applyToStage();
-        App.Output.system('舞台背景已更新（已压缩到最长边 ' + IMAGE_MAX_EDGE + 'px 内）。');
-        App.Bubble.say('背景换好啦～', { ms: 2500 });
+        self._storeImportedImage('backgrounds', 'bg', dataUrl, file, fail);
       });
     },
 
     importWallpaper: function (file) {
       var self = this;
       this._importImageFile(file, function (dataUrl, fail) {
-        if (!save({ bg: self.bg, wallpaper: dataUrl })) {
-          fail('壁纸保存失败，浏览器存储空间可能已满。', '壁纸存不上，换张小图试试');
-          return;
-        }
-        self.wallpaper = dataUrl;
-        self.applyWallpaper();
-        App.Output.system('界面壁纸已更新（已压缩到最长边 ' + IMAGE_MAX_EDGE + 'px 内）。');
-        App.Bubble.say('壁纸换好啦～', { ms: 2500 });
+        self._storeImportedImage('wallpapers', 'wallpaper', dataUrl, file, fail);
       });
     },
 
-    /* 按 PRESETS 生成舞台背景缩略图，外加导入按钮 */
-    buildPicker: function () {
-      var picker = document.getElementById('bg-picker');
+    /* 导入结果落盘：图片库可写就写进对应文件夹，否则退回浏览器存储。
+       两条路都保留「已压缩到最长边」的反馈，让用户知道原图没动。 */
+    _storeImportedImage: function (folder, key, dataUrl, file, fail) {
+      var self = this;
+      var isBg = key === 'bg';
+      var label = isBg ? '舞台背景' : '界面壁纸';
+      var short = isBg ? '背景' : '壁纸';
+      var bubble = isBg ? '背景换好啦～' : '壁纸换好啦～';
+
+      function applyValue(value) {
+        // save() 是整存接口：只传一个键会把另一个键写成 undefined
+        var patch = isBg
+          ? { bg: value, wallpaper: self.wallpaper }
+          : { bg: self.bg, wallpaper: value };
+        if (!save(patch)) {
+          fail(label + '保存失败，浏览器存储空间可能已满。', short + '存不上，换张小图试试');
+          return false;
+        }
+        self[key] = value;
+        if (isBg) self.applyToStage(); else self.applyWallpaper();
+        return true;
+      }
+
+      function fallback(prefix) {
+        if (!applyValue(dataUrl)) return;
+        App.Output.system(label + '已更新（已压缩到最长边 ' + IMAGE_MAX_EDGE + 'px 内）。' +
+          (prefix ? ' ' + prefix : ''));
+        if (prefix) {
+          App.Output.system('提示：图片目前只存在浏览器里；授权 data 目录后会自动迁移到文件夹。');
+        }
+        App.Bubble.say(bubble, { ms: 2500 });
+      }
+
+      var status = (App.ImageLib && App.ImageLib.getStatus) ? App.ImageLib.getStatus() : null;
+      if (!status || !status.canWrite || !App.ImageLib.save) {
+        var hint = '';
+        if (status && status.mode === 'none') {
+          hint = '当前打开方式不能写文件夹，可点面板里的「授权 data 目录」或运行 npm run serve。';
+        } else if (status && status.mode === 'fsa') {
+          hint = '目录还没授权：点面板里的「授权 data 目录」后再导入，就能直接写入文件夹。';
+        } else if (status && status.mode === 'server') {
+          hint = '图片服务暂时不可用：确认 npm run serve 还在运行。';
+        }
+        fallback(hint);
+        return;
+      }
+
+      App.ImageLib.save(folder, dataUrl, { name: file && file.name }).then(function (res) {
+        if (!res || !res.ok) {
+          fallback('写入文件夹失败：' + ((res && res.error) || '未知错误'));
+          return;
+        }
+        if (!applyValue(res.path)) return;
+        self.buildPicker();
+        self.buildWallpaperPicker();
+        App.Output.system(label + '已更新并保存到 ' + res.path +
+          '（已压缩到最长边 ' + IMAGE_MAX_EDGE + 'px 内）。');
+        App.Bubble.say(bubble, { ms: 2500 });
+      }, function (e) {
+        fallback('写入文件夹失败：' + (e && e.message ? e.message : e));
+      });
+    },
+
+    /* 两个面板结构一致：提示 → 无 → 精选预设 → 图片库动态图片 → 当前自定义 → 导入按钮 */
+    _buildImagePicker: function (picker, folder, tipText, presets, current) {
       if (!picker) return;
 
       var frag = document.createDocumentFragment();
       var tip = document.createElement('span');
       tip.className = 'bg-picker-tip';
-      tip.textContent = '选择舞台背景：';
+      tip.textContent = tipText;
       frag.appendChild(tip);
 
       var none = document.createElement('button');
@@ -512,23 +579,52 @@
       none.textContent = '无';
       frag.appendChild(none);
 
-      PRESETS.forEach(function (p) {
+      var seen = Object.create(null);
+
+      function addThumb(path, label) {
+        if (!path || seen[path]) return;
+        seen[path] = true;
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'bg-thumb';
-        btn.dataset.path = p.path;
-        btn.title = p.label || p.path;
-        btn.style.backgroundImage = 'url("' + p.path + '")';
+        btn.dataset.path = path;
+        btn.title = label || path;
+        btn.style.backgroundImage = 'url("' + imageCssUrl(path) + '")';
         frag.appendChild(btn);
+      }
+
+      var dynamic = (App.ImageLib && App.ImageLib.list) ? App.ImageLib.list(folder) : [];
+      var dynamicPaths = Object.create(null);
+      dynamic.forEach(function (it) { dynamicPaths[it.path] = true; });
+
+      // 扫描成功时以目录为准：预设文件如果不在授权目录里就不显示，避免破图
+      var scanReady = !!(App.ImageLib && App.ImageLib.getStatus &&
+        App.ImageLib.getStatus().state === 'ready');
+      presets.forEach(function (p) {
+        if (scanReady && !dynamicPaths[p.path]) return;
+        addThumb(p.path, p.label || p.path);
       });
 
-      // 当前背景若是导入的 data URL，用一个只读缩略图展示现状。
-      // 刻意不给 data-path：委托查找会跳过它，也避免把巨长的 base64 写进 DOM 属性
-      if (this.bg && this.bg.indexOf('data:image/') === 0) {
+      dynamic.forEach(function (it) {
+        addThumb(it.path, it.label || it.name);
+      });
+
+      // 当前选择不在预设/扫描结果里（例如目录权限尚未恢复）：仍给一个可点的缩略图
+      if (current && current.indexOf('data:image/') !== 0 && !seen[current]) {
+        var name = current.split('/').pop();
+        var label = (App.ImageLib && App.ImageLib.labelOf)
+          ? App.ImageLib.labelOf(name)
+          : name;
+        addThumb(current, '当前选择：' + label);
+      }
+
+      // 当前是导入的 data URL：只读缩略图。刻意不给 data-path：
+      // 委托查找会跳过它，也避免把巨长的 base64 写进 DOM 属性
+      if (current && current.indexOf('data:image/') === 0) {
         var cur = document.createElement('span');
         cur.className = 'bg-thumb selected';
-        cur.title = '当前自定义背景';
-        cur.style.backgroundImage = 'url("' + this.bg + '")';
+        cur.title = folder === 'backgrounds' ? '当前自定义背景' : '当前自定义壁纸';
+        cur.style.backgroundImage = 'url("' + current + '")';
         frag.appendChild(cur);
       }
 
@@ -541,7 +637,49 @@
 
       picker.innerHTML = '';
       picker.appendChild(frag);
-      this.syncPickerSelection(picker);
+      // 状态行是第二个子节点：没有加载 imageLib.js 时完全不生成，保持旧结构
+      this._appendImageLibStatus(picker, folder);
+      if (folder === 'backgrounds') this.syncPickerSelection(picker);
+      else this.syncWallpaperPickerSelection(picker);
+    },
+
+    /* 图片库状态 + 授权/刷新按钮。只在 App.ImageLib 存在时生成 */
+    _appendImageLibStatus: function (picker, folder) {
+      if (!App.ImageLib || !App.ImageLib.getStatus) return;
+      var st = App.ImageLib.getStatus(folder);
+      var row = document.createElement('div');
+      row.className = 'image-lib-status';
+
+      var msg = document.createElement('span');
+      msg.className = 'image-lib-msg' +
+        (st.tone === 'ok' ? ' lib-ok' : (st.tone === 'bad' ? ' lib-bad' : ''));
+      msg.textContent = st.message;
+      row.appendChild(msg);
+
+      if (st.canAuthorize) {
+        var auth = document.createElement('button');
+        auth.type = 'button';
+        auth.className = 'image-lib-btn';
+        auth.dataset.libAction = 'authorize';
+        auth.textContent = st.mode === 'server' ? '重试'
+          : (st.state === 'needs-authorize' ? '授权 data 目录…' : '重新授权');
+        row.appendChild(auth);
+      }
+      if (st.canRefresh) {
+        var ref = document.createElement('button');
+        ref.type = 'button';
+        ref.className = 'image-lib-btn';
+        ref.dataset.libAction = 'refresh';
+        ref.textContent = '刷新';
+        ref.title = '重新扫描图片文件夹';
+        row.appendChild(ref);
+      }
+      picker.appendChild(row);
+    },
+
+    buildPicker: function () {
+      this._buildImagePicker(document.getElementById('bg-picker'),
+        'backgrounds', '选择舞台背景：', PRESETS, this.bg);
     },
 
     syncPickerSelection: function (picker) {
@@ -553,54 +691,9 @@
       }
     },
 
-    /* 按 WALLPAPER_PRESETS 生成壁纸缩略图，外加导入按钮 */
     buildWallpaperPicker: function () {
-      var picker = document.getElementById('wallpaper-picker');
-      if (!picker) return;
-
-      var frag = document.createDocumentFragment();
-      var tip = document.createElement('span');
-      tip.className = 'bg-picker-tip';
-      tip.textContent = '选择界面壁纸：';
-      frag.appendChild(tip);
-
-      var none = document.createElement('button');
-      none.type = 'button';
-      none.className = 'bg-none';
-      none.dataset.path = '';
-      none.textContent = '无';
-      frag.appendChild(none);
-
-      WALLPAPER_PRESETS.forEach(function (p) {
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'bg-thumb';
-        btn.dataset.path = p.path;
-        btn.title = p.label || p.path;
-        btn.style.backgroundImage = 'url("' + p.path + '")';
-        frag.appendChild(btn);
-      });
-
-      // 当前壁纸若是导入的 data URL，用一个只读缩略图展示现状。
-      // 刻意不给 data-path：委托查找会跳过它，也避免把巨长的 base64 写进 DOM 属性
-      if (this.wallpaper && this.wallpaper.indexOf('data:image/') === 0) {
-        var cur = document.createElement('span');
-        cur.className = 'bg-thumb selected';
-        cur.title = '当前自定义壁纸';
-        cur.style.backgroundImage = 'url("' + this.wallpaper + '")';
-        frag.appendChild(cur);
-      }
-
-      var imp = document.createElement('button');
-      imp.type = 'button';
-      imp.className = 'bg-import';
-      imp.dataset.action = 'import';
-      imp.textContent = '本地图片…';
-      frag.appendChild(imp);
-
-      picker.innerHTML = '';
-      picker.appendChild(frag);
-      this.syncWallpaperPickerSelection(picker);
+      this._buildImagePicker(document.getElementById('wallpaper-picker'),
+        'wallpapers', '选择界面壁纸：', WALLPAPER_PRESETS, this.wallpaper);
     },
 
     syncWallpaperPickerSelection: function (picker) {
@@ -611,6 +704,160 @@
         btns[i].classList.toggle('selected', on);
       }
       // 导入的 data URL 不落在任何 data-path 上，「无」保持未选中；自定义缩略图自带 selected
+    },
+
+    /* ---------------- 图片库（App.ImageLib，见 imageLib.js） ---------------- */
+
+    /* 启动时异步探测：服务器 / 目录授权 / 不可用。不阻塞首屏，也不主动弹授权框 */
+    initImageLib: function () {
+      var self = this;
+      if (!App.ImageLib || this._imageLibBound) return;
+      this._imageLibBound = true;
+
+      if (App.bus && App.bus.on) {
+        App.bus.on('imagelib:changed', function () {
+          self.buildPicker();
+          self.buildWallpaperPicker();
+        });
+      }
+
+      App.ImageLib.init().then(function () {
+        self.reconcileImageSelections();
+        self.buildPicker();
+        self.buildWallpaperPicker();
+        self._migrateLegacyImages();
+      }).catch(function (e) {
+        console.warn('[Settings] 图片库初始化失败', e);
+      });
+    },
+
+    /* 面板里「授权 / 重新授权 / 刷新」按钮的统一入口 */
+    handleImageLibAction: function (action) {
+      var self = this;
+      if (!App.ImageLib) return;
+
+      if (action === 'authorize') {
+        App.Output.system('正在申请图片目录权限；如果弹出选择框，请选 desktop-pet/data 文件夹。');
+        App.ImageLib.authorize().then(function (ok) {
+          if (ok) {
+            App.Output.system('图片目录授权成功，正在同步…');
+            self.reconcileImageSelections();
+            self.buildPicker();
+            self.buildWallpaperPicker();
+            self._migrateLegacyImages();
+          } else {
+            var st = App.ImageLib.getStatus();
+            App.Output.error('目录授权没有完成：' + (st.lastError || '已取消'));
+            self.buildPicker();
+            self.buildWallpaperPicker();
+          }
+        });
+        return;
+      }
+
+      if (action === 'refresh') {
+        App.ImageLib.refresh().then(function (r) {
+          self.reconcileImageSelections();
+          self.buildPicker();
+          self.buildWallpaperPicker();
+          if (r && r.ok) {
+            App.Output.system('图片目录已刷新。');
+            return;
+          }
+          var why = (r && r.error) || '未知错误';
+          if (why === 'needs-permission' || why === 'prompt') {
+            why = '目录授权已过期，请点「重新授权」';
+          } else if (why === 'needs-authorize') {
+            why = '还没有授权 data 目录';
+          } else if (why === 'unsupported') {
+            why = '当前打开方式不支持图片目录';
+          }
+          App.Output.error('刷新图片目录失败：' + why);
+        });
+      }
+    },
+
+    /* 展开面板时顺便重扫一次，手动拖进文件夹的图不用重启应用 */
+    refreshImageLibOnOpen: function () {
+      var self = this;
+      if (!App.ImageLib || !App.ImageLib.getStatus) return;
+      var st = App.ImageLib.getStatus();
+      if (!st.canRefresh) return;
+      App.ImageLib.refresh().then(function () {
+        self.reconcileImageSelections();
+        self.buildPicker();
+        self.buildWallpaperPicker();
+      });
+    },
+
+    /* 授权成功/扫描成功后，清掉已经不在目录里的选择；扫描失败时绝不清理 */
+    reconcileImageSelections: function () {
+      if (!App.ImageLib || !App.ImageLib.getStatus) return;
+      var st = App.ImageLib.getStatus();
+      if (st.mode === 'none' || st.state !== 'ready') return;
+
+      var changed = false;
+      var self = this;
+
+      function check(folder, value) {
+        if (!value || value.indexOf('data:image/') === 0) return value;
+        if (!App.ImageLib.isImagePath(value, folder)) return value;   // 精选预设/未知值不在这里处理
+        var exists = App.ImageLib.list(folder).some(function (it) {
+          return it.path === value;
+        });
+        if (exists) return value;
+        changed = true;
+        return null;
+      }
+
+      var bg = check('backgrounds', this.bg);
+      var wp = check('wallpapers', this.wallpaper);
+      if (!changed) return;
+      if (!save({ bg: bg, wallpaper: wp })) return;
+
+      this.bg = bg;
+      this.wallpaper = wp;
+      this.applyToStage();
+      this.applyWallpaper();
+      App.Output.system('原来选择的图片文件已不存在，已恢复为无背景/无壁纸。');
+    },
+
+    /* 目录可写后，把历史上存成 data URL 的背景/壁纸迁移成文件夹里的文件 */
+    _migrateLegacyImages: function () {
+      if (!App.ImageLib || !App.ImageLib.getStatus || !App.ImageLib.save) return;
+      var st = App.ImageLib.getStatus();
+      if (!st.canWrite) return;
+      var self = this;
+
+      function migrate(folder, key, value) {
+        if (!value || value.indexOf('data:image/') !== 0) return;
+        if (self['_migrating_' + key]) return;
+        self['_migrating_' + key] = true;
+
+        App.ImageLib.save(folder, value, {
+          name: key === 'bg' ? 'background.jpg' : 'wallpaper.jpg'
+        }).then(function (res) {
+          // 迁移期间用户可能又换了图，别覆盖新选择
+          if (!res || !res.ok || self[key] !== value) return;
+          var patch = key === 'bg'
+            ? { bg: res.path, wallpaper: self.wallpaper }
+            : { bg: self.bg, wallpaper: res.path };
+          if (!save(patch)) return;
+          self[key] = res.path;
+          if (key === 'bg') self.applyToStage(); else self.applyWallpaper();
+          self.buildPicker();
+          self.buildWallpaperPicker();
+          App.Output.system('已把当前自定义' + (key === 'bg' ? '背景' : '壁纸') +
+            '保存到 ' + res.path + '。');
+        }).catch(function () {
+          // 迁移失败不打扰用户，保留 data URL
+        }).then(function () {
+          self['_migrating_' + key] = false;
+        });
+      }
+
+      migrate('backgrounds', 'bg', this.bg);
+      migrate('wallpapers', 'wallpaper', this.wallpaper);
     },
 
     /* ---------------- 虚拟形象 ---------------- */
@@ -1111,10 +1358,18 @@
         others.forEach(function (o) { if (o) o.hidden = true; });
       }
       if (btnBg && picker) {
-        btnBg.addEventListener('click', function () { toggle(picker, [wPicker, lPicker, cPicker]); });
+        btnBg.addEventListener('click', function () {
+          var willOpen = picker.hidden;
+          toggle(picker, [wPicker, lPicker, cPicker]);
+          if (willOpen) self.refreshImageLibOnOpen();
+        });
       }
       if (btnWp && wPicker) {
-        btnWp.addEventListener('click', function () { toggle(wPicker, [picker, lPicker, cPicker]); });
+        btnWp.addEventListener('click', function () {
+          var willOpen = wPicker.hidden;
+          toggle(wPicker, [picker, lPicker, cPicker]);
+          if (willOpen) self.refreshImageLibOnOpen();
+        });
       }
       if (btnChar && cPicker) {
         btnChar.addEventListener('click', function () {
@@ -1124,15 +1379,20 @@
         });
       }
 
-      // 事件委托：从点击目标向上找带 data-action 或 data-path 的按钮（不依赖 closest）
+      // 事件委托：从点击目标向上找带 data-action / data-path / data-lib-action 的按钮
       if (picker) {
         picker.addEventListener('click', function (e) {
           var t = e.target;
           while (t && t !== picker && !(t.dataset &&
-                 (typeof t.dataset.action === 'string' || typeof t.dataset.path === 'string'))) {
+                 (typeof t.dataset.action === 'string' || typeof t.dataset.path === 'string' ||
+                  typeof t.dataset.libAction === 'string'))) {
             t = t.parentNode;
           }
           if (!t || t === picker || !t.dataset) return;
+          if (t.dataset.libAction) {
+            self.handleImageLibAction(t.dataset.libAction);
+            return;
+          }
           if (t.dataset.action === 'import') {
             if (fileBg) fileBg.click();
             return;
@@ -1152,15 +1412,20 @@
         });
       }
 
-      // 壁纸面板：先认 data-action（导入按钮），再认 data-path（预设 / 无）
+      // 壁纸面板：先认 data-lib-action（授权/刷新），再认 data-action（导入），最后 data-path
       if (wPicker) {
         wPicker.addEventListener('click', function (e) {
           var t = e.target;
           while (t && t !== wPicker && !(t.dataset &&
-                 (typeof t.dataset.action === 'string' || typeof t.dataset.path === 'string'))) {
+                 (typeof t.dataset.action === 'string' || typeof t.dataset.path === 'string' ||
+                  typeof t.dataset.libAction === 'string'))) {
             t = t.parentNode;
           }
           if (!t || t === wPicker || !t.dataset) return;
+          if (t.dataset.libAction) {
+            self.handleImageLibAction(t.dataset.libAction);
+            return;
+          }
           if (t.dataset.action === 'import') {
             if (fileInput) fileInput.click();
             return;

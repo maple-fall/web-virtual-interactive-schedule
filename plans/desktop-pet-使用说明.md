@@ -38,6 +38,10 @@
 
 > **如果看到的是橙色小猫而不是紫发角色**，说明视频素材没加载上、自动降级到了内置 SVG 动画。功能完全不受影响，七种状态一样能切换。原因和解决办法见 [第十二节](#为什么我看到的是一只橙色小猫)。
 
+> **想让 `data/backgrounds/`、`data/wallpapers/` 里新放的图自动出现在面板里？**
+> 双击打开时，在面板底部点一次 **「授权 data 目录…」** 选择 `desktop-pet/data`；
+> 或者运行 `npm run serve` 用本地服务器打开。详见[第十节](#十界面外观舞台背景与界面壁纸)。
+
 > **想在手机或平板上用？** 见 [第十六节](#十六移动端使用)。
 
 ---
@@ -503,10 +507,35 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 | 按钮 | 更换背景 | 界面壁纸 |
 | 作用范围 | 只铺在宠物舞台那块 | 铺满整个窗口，像电脑桌面壁纸 |
 | 预设 | 1 张（紫色，放 `data/backgrounds/`） | 1 张（中山装·人生哲理，放 `data/wallpapers/`） |
-| 能导入本地图片 | ✅ | ✅ |
+| 自动发现文件夹里的图 | ✅ `data/backgrounds/` | ✅ `data/wallpapers/` |
+| 能导入本地图片 | ✅ 会写回对应文件夹 | ✅ 会写回对应文件夹 |
 
 > 两者的图片**分开放**：舞台背景在 `data/backgrounds/`，界面壁纸在 `data/wallpapers/`。
 > 换壁纸的面板里只会列出 `data/wallpapers/` 下的图，不会混进背景图。
+
+### 图片自动同步与落盘
+
+**手动放图**：把图片直接拖进 `data/backgrounds/` 或 `data/wallpapers/`，重新打开对应面板就能看到，
+不需要改代码或重启应用。支持 `.jpg / .jpeg / .png / .webp / .gif`，SVG 会被忽略。
+
+**双击打开（file://）**：第一次需要点面板底部的 **「授权 data 目录…」**，选择 `desktop-pet/data`
+文件夹（选 `desktop-pet/` 也会自动找到 `data/`）。授权后：
+
+- 面板会列出文件夹里的所有图片；展开面板时会自动重扫
+- 「本地图片…」导入的图会**真正写进对应文件夹**，文件名是「原文件名-日期-时间.jpg」，
+  例如 `二次元-20261019-134500.jpg`
+- 设置里存的是短路径，不再把整张图塞进 LocalStorage；旧版本存成 base64 的图会在授权后自动迁移
+- 浏览器重启后如果提示「授权已过期」，点 **「重新授权」** 即可；在授权弹窗里选
+  **「每次访问都允许」** 可以减少重复提示
+
+**本地服务器模式**：在仓库根目录运行 `npm run serve`（Windows 也可以双击 `start-server.bat`），
+打开 `http://127.0.0.1:8123/`。这种模式下不需要目录授权，图片列目录和写入全自动。
+
+> 如果当前打开方式两者都不支持（例如某些 IDE 预览窗口），导入的图会退回旧行为，
+> **只保存在浏览器里**；面板底部会明确提示，并给出解决办法。
+
+> HTTP 模式与双击打开是**两个独立的存储空间**：日程、设置、形象包互不相通。
+> 想继续用原来的数据，就保持双击打开 + 目录授权。
 
 ### 舞台背景
 
@@ -577,7 +606,11 @@ document.getElementById('stage').dataset.state     // 当前状态，如 'studyi
 | 键名 | 存什么 |
 | --- | --- |
 | `desktop_pet_v2` | 你的日程数据 |
-| `desktop_pet_settings` | 舞台背景、界面壁纸的选择，以及本地模型的开关/地址/模型名 |
+| `desktop_pet_settings` | 舞台背景、界面壁纸的选择（路径或 data URL），以及本地模型的开关/地址/模型名 |
+
+背景/壁纸图片本身不在 LocalStorage 里：启用图片库后会写进 `data/backgrounds/`、`data/wallpapers/`；
+只在浏览器兜底模式下才会以 base64 存进上面的设置键。目录授权句柄存在 IndexedDB 的
+`desktop_pet_images` 库里（不存图片内容）。
 
 关掉浏览器不会丢。**但清浏览器数据会丢**，所以建议定期点 **「导出备份」** 存一份 JSON。需要时点 **「导入备份」** 选回那个文件即可。
 
@@ -623,7 +656,10 @@ var WALLPAPER_OVERLAY = 'linear-gradient(rgba(15,19,34,.35), rgba(15,19,34,.35))
 
 ### 界面可以换多大的壁纸？
 
-导入时自动等比缩放到最长边 1920 像素以内、转成 JPEG（质量 0.8）。所以放多大的原图都行，超过 20MB 的文件会被拒绝。处理后的图存在 LocalStorage 里，所以图越大越占空间——建议选压缩后 1MB 以内的。
+导入时自动等比缩放到最长边 1920 像素以内、转成 JPEG（质量 0.8）。所以放多大的原图都行，超过 20MB 的文件会被拒绝。
+
+处理后的图会写进 `data/backgrounds/` 或 `data/wallpapers/`，设置里只存路径，**不再占 LocalStorage**。
+如果当前打开方式不支持写文件夹，才会退回把压缩后的图存进 LocalStorage（面板会提示）——那种情况下建议选压缩后 1MB 以内的图。
 
 ### 宠物突然不动的？
 
@@ -670,15 +706,17 @@ var WALLPAPER_OVERLAY = 'linear-gradient(rgba(15,19,34,.35), rgba(15,19,34,.35))
 AIcompete/
 ├── desktop-pet/        ← 应用本体，自包含，双击 index.html 就能跑；零依赖、零构建
 ├── plans/              三篇文档：本篇使用说明 + 开发记录 + 修复与优化记录（问题索引与验证）
-├── tests/              14 个回归测试脚本 + fixtures + run.js 总入口（不参与运行）
+├── tests/              16 个回归测试脚本 + fixtures + run.js 总入口（不参与运行）
 ├── tools/              模板 PDF / CMap 生成器、视频处理与形象包工具（不参与运行）
+│   └── serve-desktop-pet.js  本地图片服务器（零依赖；给 HTTP 模式提供图片列表/写入接口）
+├── start-server.bat    Windows 双击启动本地图片服务器（需要安装 Node.js）
 ├── package.json        dev-only：测试与生成命令的 npm 入口，desktop-pet/ 不需要它
 ├── package-lock.json   npm install 生成的依赖锁文件
 ├── node_modules/       tools/ 与两个 PDF 测试的 dev 依赖，已被 .gitignore 排除
 └── .gitignore          排除 dev 依赖与测试临时产物
 ```
 
-改完代码想验一下有没有弄坏东西，一条命令跑完全部 12 个离线套件（693 条断言，纯 Node，几秒出结果、不开浏览器）：
+改完代码想验一下有没有弄坏东西，一条命令跑完全部 14 个离线套件（803 条断言，纯 Node，几秒出结果、不开浏览器）：
 
 ```bash
 npm test
@@ -686,6 +724,11 @@ npm test
 
 输出是一张表，`失败` 为 0 就算过。首次使用先在仓库根目录 `npm install` —— 装的是 dev 侧的
 `pdfkit` / `pdfjs-dist` 两个包，**`desktop-pet/` 本体依然什么都不用装**。
+图片库的两个套件是零依赖的，没装 `node_modules` 也能单独跑：
+
+```bash
+npm run test:image
+```
 
 想只跑某一个，或看清楚每个脚本管什么：
 
@@ -696,6 +739,8 @@ node tests/test-query.js             # 查询：时间窗口、指定事项、�
 node tests/test-bulk-edit.js         # 批量增删改：按星期+标题定位、确认流程、按星期查询
 node tests/test-pip.js               # 画中画（含计划栏）
 node tests/test-character-pack.js    # 形象包：zip 解析/打包、IndexedDB 存取、切形象
+node tests/test-image-lib.js         # 图片库：none/server/FSA 三种后端 + 与设置面板接线
+node tests/test-image-server.js      # 本地图片服务器：列表/上传/重名/路径穿越/Range
 node tests/test-stage-background.js  # 舞台背景
 node tests/test-wallpaper.js         # 界面壁纸
 node tests/test-warn-reminders.js    # 提醒机制
@@ -727,6 +772,8 @@ desktop-pet/
 ├── style.css                      深色主题 + 各状态 CSS 动画 + 壁纸半透明规则
 ├── app.js                         核心：Config / 事件总线 / 工具 / 时钟 / 计划表渲染 / 对话编排
 ├── settings.js                    舞台背景 + 界面壁纸 + 本地模型 + 虚拟形象（导入/切换/导出）
+├── imageLib.js                    图片库：扫描/写入 data/backgrounds、data/wallpapers
+│                                  （server / File System Access / 浏览器兜底三种后端）
 ├── pip.js                         画中画（文档画中画 API，把舞台搬进独立小窗）
 ├── lib/pdfjs/                     vendored pdf.js 3.11.174（legacy 构建，PDF 文字层提取）
 │   ├── cmaps.js                   内置 GB 系 CMap（生成产物）：让未内嵌字体的中文 PDF 能提出文字
@@ -754,8 +801,10 @@ desktop-pet/
 │   ├── schedule_template.pdf      「下载模板」下载的模板（一次生成，静态文件）
 │   ├── schedule_template.csv      同一份模板的 CSV 版本，格式参考用
 │   ├── xxx课表.pdf  教务系统导出的网格课表样本（课表导入的测试用例）
-│   ├── backgrounds/bg1.jpg        舞台背景预设
-│   └── wallpapers/wall1.jpg       界面壁纸预设
+│   ├── backgrounds/               舞台背景图片目录（bg1.jpg 为内置预设；
+│   │                              用户放进来的图会自动出现在「更换背景」面板）
+│   └── wallpapers/                界面壁纸图片目录（wall1.jpg 为内置预设；
+│                                  用户放进来的图会自动出现在「界面壁纸」面板）
 └── videos/                        角色动画素材
     ├── zhenzhu/                   内置形象 zhenzhu 的 7 个 WebM（应用默认形象）
     ├── zhenzhu.zip                zhenzhu 的 zip 版，可在「更换形象」里重新导入
@@ -784,7 +833,8 @@ desktop-pet/
 | 想做什么 | 需要什么 |
 | --- | --- |
 | 只用应用 | 克隆 / 下载 zip → 双击 `desktop-pet/index.html`，什么都不用装 |
-| 跑测试 / 生成模板 PDF 和 CMap | 仓库根目录 `npm install`（按 `package-lock.json` 锁定版本装 `pdfkit`、`pdfjs-dist`，仅开发侧用） |
+| 用本地服务器 / 让导入图片直接落盘 | 安装 Node.js → 仓库根目录 `npm run serve`（服务器零依赖，**不用** `npm install`） |
+| 跑测试 / 生成模板 PDF 和 CMap | 仓库根目录 `npm install`（按 `package-lock.json` 锁定版本装 `pdfkit`、`pdfjs-dist`，仅开发侧用）。图片库的两个测试零依赖，可单独 `npm run test:image` |
 | 处理视频素材 | `pip install numpy opencv-python-headless scipy` + 一个 ffmpeg。脚本按 `--ffmpeg` → 环境变量 `FFMPEG` → `tools/video/ffmpeg.exe` → `PATH` → `imageio-ffmpeg` 的顺序自动找，详见 [tools/video/README.md](../tools/video/README.md) |
 | 打包形象包 | 只需 Python 标准库，`char_pack.py` 零额外依赖 |
 
@@ -867,21 +917,32 @@ iOS 比 Android 麻烦：**Files App 里点 HTML 只会预览单个文件**，�
 
 要求：电脑和 iPad 连**同一个 Wi-Fi**，且电脑保持开机。
 
-在 `D:\AIcompete` 目录下打开命令行：
+**优先用仓库自带的服务器**（零依赖，只需要 Node.js；同时开启图片自动同步）：
 
 ```bash
-python -m http.server 8000
-```
-
-没装 Python 的话，装了 Node.js 也可以用：
-
-```bash
-npx serve
+cd D:\AIcompete
+npm run serve:lan        # 监听 0.0.0.0:8123
 ```
 
 **查电脑的局域网 IP**：另开一个命令行窗口，输入 `ipconfig`，找「IPv4 地址」，形如 `192.168.1.5`。
 
-**iPad 上**：Safari 地址栏输入 `http://192.168.1.5:8000/desktop-pet/`（换成你查到的 IP）。
+**iPad 上**：Safari 地址栏输入 `http://192.168.1.5:8123/`（换成你查到的 IP）。
+
+> 自带服务器默认监听 `127.0.0.1`；`serve:lan` 会允许局域网访问。图片写入接口**没有鉴权**，
+> 只在你信任的局域网里使用，不用时把命令行窗口关掉。
+> 这种模式下导入的图片会直接写进电脑上的 `data/backgrounds/`、`data/wallpapers/`。
+
+如果只想用本机，`npm run serve` 即可；Windows 也可以双击 `start-server.bat`。
+
+**备选：纯静态服务器**（没有图片写入接口，图片会退回目录授权 / 浏览器兜底）：
+
+```bash
+python -m http.server 8000
+# 或
+npx serve
+```
+
+用这种方式时 iPad 地址是 `http://192.168.1.5:8000/desktop-pet/`。
 
 打不开的话，依次排查：
 
@@ -915,6 +976,8 @@ App Store 里搜 **Koder**（或类似的代码编辑器 App，关键词 "local 
 3. 手机上打开应用，点 **「导入备份」** 选那个文件
 
 > 背景和壁纸设置**不包含在备份里**（备份只存日程）。手机上需要重新选一次，导入的本地壁纸图片也得重新导入。
+> 手机浏览器通常拿不到目录授权，也没有配套本地服务器，所以导入的图会退回「只存在浏览器里」；
+> 手机上手动放图也不方便，建议在电脑上放好、连同文件夹一起拷过去。
 
 **触摸操作**：界面是按点击设计的，触摸屏上所有按钮都能正常点。输入框会自动弹出中文键盘，和平时打字一样。
 
@@ -1304,10 +1367,12 @@ export OLLAMA_ORIGINS="*"
 > **设完必须真的重启 Ollama（退出托盘图标再打开）**。环境变量只在进程启动那一刻读一次，
 > 正在跑的那个进程不会自己更新——不重启，页面会一直停在「未连接」，看起来像设置没生效。
 >
-> **不想设环境变量也行**：`cd desktop-pet` 后跑 `python -m http.server 8080`，
-> 浏览器开 `http://localhost:8080/`，Ollama 默认就放行 localhost 来源。
-> 但 `file://` 和 `http://localhost:8080` 是**两个独立的存储空间**，原来双击时存的日程
-> 在新地址下看不到。要带过去：双击打开 → 顶部「导出备份」下载一个 JSON → 换 8080 地址打开 → 「导入备份」。
+> **不想设环境变量也行**：用仓库自带的 `npm run serve`（`http://127.0.0.1:8123/`），
+> 或 `cd desktop-pet` 后跑 `python -m http.server 8080`（`http://localhost:8080/`）——
+> Ollama 默认就放行 localhost 来源。
+> 但 `file://` 和 `http://localhost:*` 是**两个独立的存储空间**，原来双击时存的日程
+> 在新地址下看不到。要带过去：双击打开 → 顶部「导出备份」下载一个 JSON → 换 HTTP 地址打开 → 「导入备份」。
+> 同理，`file://` 下授权的图片目录和 HTTP 模式下的图片库也是两套，互不影响。
 
 **3. 在页面里打开开关**
 
@@ -1444,7 +1509,7 @@ export OLLAMA_ORIGINS="*"
 想验证接得通不通，在仓库根目录跑：
 
 ```bash
-npm test                      # 离线：全部 12 个套件 693 条断言，不联网。test-llm.js 占其中 219 条
+npm test                      # 离线：全部 14 个套件 803 条断言，不联网。test-llm.js 占其中 219 条
 npm run test:live             # 联网：真连 Ollama 跑一遍完整链路（42 条）
 ```
 

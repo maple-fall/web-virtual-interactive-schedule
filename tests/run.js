@@ -1,5 +1,5 @@
 /*
- * 全套离线回归入口：把 12 个无头套件挨个起子进程跑一遍，汇总成一张表。
+ * 全套离线回归入口：把 14 个无头套件挨个起子进程跑一遍，汇总成一张表。
  * 每个套件自己打印「N 通过 / M 失败」并以退出码表态，这里只负责收集。
  *
  * 默认**不**收录那两个「要真东西」的套件，它们各自单独跑更合适：
@@ -21,6 +21,8 @@ const OFFLINE = [
   'test-bulk-edit.js',
   'test-pip.js',
   'test-character-pack.js',
+  'test-image-lib.js',
+  'test-image-server.js',
   'test-stage-background.js',
   'test-wallpaper.js',
   'test-warn-reminders.js',

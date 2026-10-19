@@ -15,6 +15,7 @@ credentials.json
 
 # 测试临时产物：e2e / 预览脚本跑一次就会重建（Edge 用户目录约 40MB）
 tests/_edge_*/
+tests/_tmp*/
 tests/_shot/
 tools/_shot/
 
